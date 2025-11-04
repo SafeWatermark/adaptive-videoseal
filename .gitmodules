@@ -1,0 +1,3 @@
+[submodule "src/videoseal"]
+	path = src/videoseal
+	url = https://github.com/facebookresearch/videoseal.git

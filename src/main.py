@@ -1,0 +1,413 @@
+from tqdm import tqdm
+import numpy as np
+import ffmpeg
+import os
+import cv2
+import subprocess
+import shutil
+from pathlib import Path
+
+import torch
+from torch.nn import functional as F
+
+from videoseal.evals.metrics import bit_accuracy
+from videoseal.models import Videoseal
+from videoseal.utils.cfg import setup_model_from_model_card
+
+
+class _TempWorkingDir:
+    def __init__(self, path: Path):
+        self._path = Path(path)
+        self._prev = None
+
+    def __enter__(self):
+        self._prev = Path.cwd()
+        os.chdir(self._path)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._prev is not None:
+            os.chdir(self._prev)
+
+
+def get_video_info(input_path):
+    # Open the video file
+    video = cv2.VideoCapture(input_path)
+
+    # Get video properties
+    width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = video.get(cv2.CAP_PROP_FPS)
+    codec = int(video.get(cv2.CAP_PROP_FOURCC))
+    num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Decode codec to human-readable form
+    codec_str = "".join([chr((codec >> 8 * i) & 0xFF) for i in range(4)])
+
+    video.release()  # Close the video file
+
+    return {
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "codec": codec_str,
+        "num_frames": num_frames,
+    }
+
+
+class AdaptiveVideoseal(Videoseal):
+    @staticmethod
+    def _apply_video_mode(
+        preds_w: torch.Tensor,
+        total_frames: int,
+        step_size: torch.Tensor,
+        video_mode: str,
+    ) -> torch.Tensor:
+        """
+        applies the selected video mode to expand predictions across frames
+        args:
+            preds_w (torch.Tensor): predictions for key frames [n, c, h, w]
+            total_frames (int): total number of frames to generate
+            step_size (int): number of frames between key frames
+            video_mode (str): the video mode to use. can be one of "alternate", "repeat", "interpolate"
+        returns:
+            torch.Tensor: expanded predictions [total_frames, c, h, w]
+        """
+
+        # repeat each prediction for step_size frames
+        preds_w = torch.repeat_interleave(preds_w, step_size, dim=0)
+        print(f"step_size: {step_size}")
+        return preds_w[:total_frames]
+
+    @torch.no_grad()
+    def embed(
+        self,
+        imgs: torch.Tensor,
+        msgs: torch.Tensor = None,
+        is_video: bool = True,
+        interpolation: dict = {
+            "mode": "bilinear",
+            "align_corners": False,
+            "antialias": True,
+        },
+        lowres_attenuation: bool = False,
+    ) -> dict:
+        """
+        Generates watermarked videos from the input images and messages (used for inference).
+        Videos may be arbitrarily sized.
+        """
+        """
+      Generates watermarked videos from the input images and messages (used for inference).
+      Videos may be arbitrarily sized.
+      """
+        if not is_video:
+            # fallback on parent class for batch of images
+            return super().embed(imgs, msgs, interpolation, lowres_attenuation)
+        if msgs is None:
+            msgs = self.get_random_msg()  # 1 x k
+        else:
+            assert msgs.shape[0] == 1, "Message should be unique"
+        # msgs = msgs.repeat(self.chunk_size, 1)  # 1 k -> n k
+
+        # encode by chunk of cksz imgs, propagate the wm to spsz next imgs
+        chunk_size = self.chunk_size  # n=cksz
+        step_size = self.step_size  # spsz
+
+        imgs_w = torch.zeros_like(imgs)
+
+        for ii in range(0, len(imgs[::step_size]), chunk_size):
+            nimgs_in_ck = min(chunk_size, len(imgs[::step_size]) - ii)
+            start = ii * step_size
+            end = start + nimgs_in_ck * step_size
+            all_imgs_in_ck = imgs[start:end, ...]
+
+            # if nimgs_in_ck < chunk_size:
+            #   msgs = msgs[:nimgs_in_ck]
+
+            # interpolate
+            all_imgs_res = all_imgs_in_ck.clone()
+            if all_imgs_res.shape[-2:] != (self.img_size, self.img_size):
+                all_imgs_res = F.interpolate(
+                    all_imgs_res, size=(self.img_size, self.img_size), **interpolation
+                )
+            all_imgs_res = all_imgs_res.to(self.device)
+
+            # choose one frame every step_size
+            # imgs_res = all_imgs_res[::step_size]
+
+            # calculate distance and thresholding
+            dist = torch.sqrt(
+                torch.mean((all_imgs_res[1:] - all_imgs_res[:-1]) ** 2, dim=(1, 2, 3))
+            )
+
+            # TODO: set default threshold differently
+            threshold = 0.05
+            distinct_ids = torch.where(dist > threshold)[0] + 1
+            base_ids = torch.arange(
+                0, all_imgs_res.size(0), step_size, device=imgs.device
+            )
+
+            key_frame_ids = torch.cat([base_ids, distinct_ids])
+            key_frame_ids = torch.unique(key_frame_ids)
+
+            temp = torch.cat(
+                [
+                    key_frame_ids,
+                    torch.tensor([all_imgs_res.size(0)], device=imgs.device),
+                ]
+            )
+            repeats = temp[1:] - temp[:-1]
+
+            imgs_res = all_imgs_res[key_frame_ids]
+
+            # get deltas for the chunk, and repeat them for each frame in the chunk
+            if self.embedder.yuv:  # take y channel only
+                imgs_res = self.rgb2yuv(imgs_res)[:, 0:1]
+            repeat_msgs = msgs.repeat(key_frame_ids.size(0), 1)
+
+            preds_w = self.embedder(imgs_res, repeat_msgs.to(self.device))
+
+            preds_w = self._apply_video_mode(
+                preds_w, len(all_imgs_in_ck), repeats, self.video_mode
+            )
+
+            # attenuate at low resolution if needed
+            if self.attenuation is not None and lowres_attenuation:
+                self.attenuation.to(all_imgs_res.device)
+                hmaps = self.attenuation.heatmaps(all_imgs_res)
+                preds_w = hmaps * preds_w
+
+            # interpolate back
+            preds_w = preds_w.to(imgs.device)
+            if all_imgs_in_ck.shape[-2:] != (self.img_size, self.img_size):
+                preds_w = F.interpolate(
+                    preds_w, size=all_imgs_in_ck.shape[-2:], **interpolation
+                )
+
+            # attenuate at full resolution if needed
+            if self.attenuation is not None and not lowres_attenuation:
+                self.attenuation.to(all_imgs_in_ck.device)
+                hmaps = self.attenuation.heatmaps(all_imgs_in_ck)
+                preds_w = hmaps * preds_w
+
+            # blend
+            all_imgs_in_ck_w = self.blender(all_imgs_in_ck, preds_w)
+            imgs_w[start:end, ...] = all_imgs_in_ck_w  # n 3 h w
+
+        # clamp
+        if self.clamp:
+            imgs_w = torch.clamp(imgs_w, 0, 1)
+
+        outputs = {
+            "imgs_w": imgs_w,  # watermarked imgs: f 3 h w
+            "msgs": msgs[0:1].repeat(len(imgs), 1),  # original messages: f k
+        }
+        return outputs
+
+
+def embed_video_clip(
+    model: Videoseal, clip: np.ndarray, msgs: torch.Tensor
+) -> np.ndarray:
+    clip_tensor = (
+        torch.tensor(clip, dtype=torch.float32, device=device).permute(0, 3, 1, 2)
+        / 255.0
+    )
+    outputs = model.embed(
+        clip_tensor, msgs=msgs, is_video=True, lowres_attenuation=True
+    )
+    processed_clip = outputs["imgs_w"]
+    processed_clip = (processed_clip * 255.0).byte().permute(0, 2, 3, 1).cpu().numpy()
+    return processed_clip
+
+
+def embed_video(
+    model: Videoseal, input_path: str, output_path: str, chunk_size: int, crf: int = 23
+) -> None:
+    # Read video dimensions
+    video_info = get_video_info(input_path)
+    width = int(video_info["width"])
+    height = int(video_info["height"])
+    fps = float(video_info["fps"])
+    num_frames = int(video_info["num_frames"])
+
+    # Open the input video
+    process1 = (
+        ffmpeg.input(input_path)
+        .output(
+            "pipe:",
+            format="rawvideo",
+            pix_fmt="rgb24",
+            s="{}x{}".format(width, height),
+            r=fps,
+        )
+        .run_async(pipe_stdout=True, pipe_stderr=subprocess.PIPE)
+    )
+    # Open the output video
+    process2 = (
+        ffmpeg.input(
+            "pipe:",
+            format="rawvideo",
+            pix_fmt="rgb24",
+            s="{}x{}".format(width, height),
+            r=fps,
+        )
+        .output(output_path, vcodec="libx264", pix_fmt="yuv420p", r=fps, crf=crf)
+        .overwrite_output()
+        .run_async(pipe_stdin=True, pipe_stderr=subprocess.PIPE)
+    )
+
+    # Create a random message
+    msgs = model.get_random_msg()
+    with open(output_path.replace(".mp4", ".txt"), "w") as f:
+        f.write("".join([str(msg.item()) for msg in msgs[0]]))
+
+    # Process the video
+    frame_size = width * height * 3
+    chunk = np.zeros((chunk_size, height, width, 3), dtype=np.uint8)
+    frame_count = 0
+    pbar = tqdm(total=num_frames, desc="Watermark embedding")
+    while True:
+        in_bytes = process1.stdout.read(frame_size)
+        if not in_bytes:
+            break
+        frame = np.frombuffer(in_bytes, np.uint8).reshape([height, width, 3])
+        chunk[frame_count % chunk_size] = frame
+        frame_count += 1
+        pbar.update(1)
+        if frame_count % chunk_size == 0:
+            processed_frame = embed_video_clip(model, chunk, msgs)
+            process2.stdin.write(processed_frame.tobytes())
+    process1.stdout.close()
+    process2.stdin.close()
+    process1.wait()
+    process2.wait()
+
+    return msgs
+
+
+def detect_video_clip(model: Videoseal, clip: np.ndarray) -> torch.Tensor:
+    clip_tensor = torch.tensor(clip, dtype=torch.float32).permute(0, 3, 1, 2) / 255.0
+    outputs = model.detect(clip_tensor, is_video=True)
+    output_bits = outputs["preds"][
+        :, 1:
+    ]  # exclude the first which may be used for detection
+    return output_bits
+
+
+def detect_video(
+    model: Videoseal, input_path: str, num_frames_for_extraction: int, chunk_size: int
+) -> None:
+    # Read video dimensions
+    video_info = get_video_info(input_path)
+    width = int(video_info["width"])
+    height = int(video_info["height"])
+    num_frames = int(video_info["num_frames"])
+
+    # Open the input video
+    process1 = (
+        ffmpeg.input(input_path)
+        .output("pipe:", format="rawvideo", pix_fmt="rgb24")
+        .run_async(pipe_stdout=True, pipe_stderr=subprocess.PIPE)
+    )
+
+    # Process the video
+    frame_size = width * height * 3
+    chunk = np.zeros((chunk_size, height, width, 3), dtype=np.uint8)
+    frame_count = 0
+    soft_msgs = []
+    pbar = tqdm(total=num_frames, desc="Watermark extraction")
+    while True:
+        if frame_count >= num_frames_for_extraction:
+            break
+        in_bytes = process1.stdout.read(frame_size)
+        if not in_bytes:
+            break
+        frame = np.frombuffer(in_bytes, np.uint8).reshape([height, width, 3])
+        chunk[frame_count % chunk_size] = frame
+        frame_count += 1
+        pbar.update(1)
+        if frame_count % chunk_size == 0:
+            soft_msgs.append(detect_video_clip(model, chunk))
+    process1.stdout.close()
+    process1.wait()
+
+    soft_msgs = torch.cat(soft_msgs, dim=0)
+    soft_msgs = soft_msgs.mean(dim=0)  # Average the predictions across all frames
+    return soft_msgs
+
+
+if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load the VideoSeal model
+    cards_dir = Path(__file__).resolve().parent / "videoseal" / "videoseal" / "cards"
+    model_card_path = cards_dir / "videoseal_1.0.yaml"
+    if not model_card_path.exists():
+        raise FileNotFoundError(
+            f"Expected model card at {model_card_path}, but it was not found."
+        )
+    cards_root = cards_dir.parent.parent
+    target_ckpt_dir = cards_root / "ckpts"
+    target_ckpt_dir.mkdir(parents=True, exist_ok=True)
+    target_ckpt = target_ckpt_dir / "y_256b_img.pth"
+    source_ckpt = Path(__file__).resolve().parent.parent / "ckpts" / "y_256b_img.pth"
+
+    if (
+        not target_ckpt.exists() or target_ckpt.stat().st_size < 100_000_000
+    ) and source_ckpt.exists():
+        shutil.copy2(source_ckpt, target_ckpt)
+
+    with _TempWorkingDir(cards_dir.parent.parent):
+        model = setup_model_from_model_card(model_card_path)
+
+    model = model.eval()
+    model = model.to(device)
+    model.compile()
+
+    # Setup the step size. Bigger step size makes embedding faster but loses a bit of robustness.
+    model.step_size = 1
+    # model.step_size = 8
+
+    model.blender.scaling_w *= 1.5  # imperceptibility/robustness trade-off
+
+    adaptive_model = AdaptiveVideoseal(model.embedder, model.detector, model.augmenter)
+    adaptive_model.load_state_dict(model.state_dict(), strict=False)
+    adaptive_model.__dict__.update(model.__dict__)
+    adaptive_model.eval()
+    adaptive_model = adaptive_model.to(device)
+    adaptive_model.compile()
+
+    adaptive_model.step_size = 8
+    adaptive_model.blender.scaling_w *= 1.5
+    adaptive_model.attenuation = model.attenuation
+
+    # Path to the input video
+    video_path = "./data/sample_movie.mp4"
+
+    # Create the output directory and path
+    output_dir = "./outputs"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, os.path.basename(video_path))
+    adaptive_output_path = os.path.join(
+        output_dir, "adaptive_" + os.path.basename(video_path)
+    )
+
+    # Embed the watermark inside the video with a random msg
+
+    adaptive_msgs_ori = embed_video(
+        adaptive_model, video_path, adaptive_output_path, 16
+    )
+    msgs_ori = embed_video(model, video_path, output_path, 16)
+
+    print(f"\nSaved watermarked video to {output_path}")
+    print(f"\nSaved watermarked video to {adaptive_output_path}")
+
+    # Detect the watermark
+    num_frames_for_extraction = 32
+    soft_msgs = detect_video(model, output_path, num_frames_for_extraction, 16)
+    adaptive_soft_msgs = detect_video(
+        adaptive_model, adaptive_output_path, num_frames_for_extraction, 16
+    )
+    bit_acc = bit_accuracy(soft_msgs, msgs_ori).item() * 100
+    adaptive_bit_acc = bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
+    print(f"\nBinary message extracted with {bit_acc:.1f}% bit accuracy")
+    print(f"\nBinary message extracted with {adaptive_bit_acc:.1f}% bit accuracy")

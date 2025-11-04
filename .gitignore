@@ -1,0 +1,20 @@
+# python
+*.pyc
+__pycache__/
+.venv
+.ruff_cache
+
+# hugginface cache
+*.cache
+
+# env, config
+.env
+
+# IDE
+.vscode/
+
+*.egg-info
+
+# result
+outputs/
+data/*
