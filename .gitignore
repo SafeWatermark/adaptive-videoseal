@@ -3,6 +3,7 @@
 __pycache__/
 .venv
 .ruff_cache
+.pytest_cache
 
 # hugginface cache
 *.cache
@@ -19,3 +20,7 @@ __pycache__/
 outputs/
 data/*
 ckpts/
+
+# test
+htmlcov
+.coverage
