@@ -1,103 +1,107 @@
-# Adaptive VideoSeal
+# **Adaptive VideoSeal**
 
-Adaptive VideoSeal extends Meta's VideoSeal video watermarking system with adaptive frame selection, propagation, and evaluation tooling for high-frame-rate content. The repository ships with the original VideoSeal inference stack, additional research notebooks, and an adaptive embedding pipeline designed for reproducible experiments.
+<p align="left">
+    <a href="README.ko.md">한국어</a>&nbsp ｜ &nbspEnglish&nbsp
+</p>
+
+
+**Adaptive VideoSeal** is an extended version of Meta’s VideoSeal video watermarking system, enhanced with **adaptive frame selection** and **watermark propagation** mechanisms.
+This repository includes the original VideoSeal implementation, research notebooks, and a **reproducible adaptive embedding pipeline** for experimentation.
 
 ## 1. Overview
 
-- **Baseline VideoSeal**: official inference and evaluation code (video and optional audio watermarking).
-- **Adaptive pipeline**: `src/main.py` builds on VideoSeal with dynamic key-frame selection and propagation.
-- **Research assets**: notebooks for ablations, dataset configs, and attenuation presets.
-- **Checkpoints**: automatically downloaded model weights (cache under `ckpts/`).
-
-Use this README as a lab manual for installation, model setup, running experiments, and extending the system.
+* **Baseline VideoSeal**: Official video/audio watermarking inference and evaluation code (`src/videoseal`).
+* **Adaptive pipeline**: `src/main.py` extends VideoSeal with **adaptive keyframe selection and watermark propagation logic**.
+* **Checkpoints**: Model weights are downloaded automatically and cached in the `ckpts/` directory.
 
 ## 2. Environment Setup
 
 ### 2.1 Prerequisites
-- Python 3.11
-- [FFmpeg](https://ffmpeg.org/) available on the `PATH`
-- PyTorch + torchvision compiled for your CUDA runtime
 
-### 2.2 Create an Environment
-Using [uv](https://github.com/astral-sh/uv):
+* Python 3.11
+* [FFmpeg](https://ffmpeg.org/) must be available in your system `PATH`
+* PyTorch + torchvision compiled for your CUDA environment
+
+### 2.2 Creating a Virtual Environment
+
 ```bash
-uv venv --python 3.11
-source .venv/bin/activate
+uv venv .venv --python 3.11
+source .venv/bin/activate  # for Linux / macOS
 uv sync
 ```
 
-Using pip:
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e .
-```
+### 2.3 Optional Development Tools
 
-> **PyTorch** needs to be installed manually for your hardware, e.g.
-> `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121`.
-
-### 2.3 Optional Tooling
 ```bash
-pip install pre-commit
+uv pip install pre-commit
 pre-commit install
 ```
-Enables linting (ruff) and formatting checks before each commit.
 
-### 2.4 Linting
+* Runs **linting (ruff)** and **format checks** automatically before each commit.
+
+### 2.4 Code Formatting
+
 ```bash
 bash scripts/format.sh
 ```
-Run Ruff’s linting checks on `src/` folders,
-automatically fix simple style issues,
-and ignore everything inside `src/videoseal/`.
 
+* Checks and auto-formats code within the `src/` directory
+* The `src/videoseal/` directory is excluded from linting.
 
-## 3. Checkpoint Management
+## 3. Quick Start
 
-The default card `videoseal_1.0.yaml` pulls the official checkpoint (`y_256b_img.pth`). First run of any script that calls `setup_model_from_model_card("videoseal")` will:
-1. download the checkpoint to `ckpts/`,
-2. copy it into `src/videoseal/ckpts/` for library-relative access.
+### 3.1 Video Scene Detector Overview
 
-To pre-download:
-```python
-from pathlib import Path
-from videoseal.videoseal.utils.cfg import setup_model_from_model_card
-Path("ckpts").mkdir(exist_ok=True)
-setup_model_from_model_card("videoseal")
-```
+AdaptiveVideoSeal detects scene changes to optimize keyframe selection and watermark propagation.
+During experiments, you can choose a detection method using the `--scene_detector` option.
 
-To use custom weights, edit the YAML card (`checkpoint_path`) and rerun the loader.
+**Detector Types**
 
+| Detector      | Description                                                                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **content**   | Detects scene changes based on variations in color, saturation, and brightness (H, S, V). Default option. Inspired by the PySceneDetect project, it computes frame-to-frame RMSE (mean pixel difference). |
+| **histogram** | Detects scene changes by comparing differences in Y-channel histogram distributions between frames.                                                                                                       |
+| **hash**      | Uses perceptual image hashes to measure frame similarity—fast and effective for detecting abrupt scene changes.                                                                                           |
 
-## 4. Quick Start
+Upcoming features: adaptive thresholding scene detector, [LPIPS](https://github.com/richzhang/PerceptualSimilarity)-based similarity metric.
 
-### 4.1 Adaptive Embedding Demo
+### 3.2 Adaptive Watermarking Experiment
+
 ```bash
-uv run src/main.py
+bash scripts/run_content.sh     # Run experiment using the content-based detector
+bash scripts/run_histogram.sh   # Run experiment using the histogram-based detector
+bash scripts/run_hash.sh        # Run experiment using the hash-based detector
 ```
 
-Flow:
-1. Load baseline VideoSeal weights.
-2. Instantiate `AdaptiveVideoseal` to enable adaptive propagation.
-3. Embed watermarks into `data/sample_video.mp4`.
-4. Save watermarked outputs to `outputs/` (both baseline and adaptive variants).
-5. Extract and report bit accuracy for baseline vs adaptive runs.
+### Execution Flow
 
-Artifacts:
-- `outputs/1.mp4`: baseline watermarked video.
-- `outputs/adaptive_1.mp4`: adaptive watermarked video.
-- `outputs/*.txt`: payload bits for reproducibility.
+1. **Load baseline VideoSeal weights**
+2. Instantiate `AdaptiveVideoSeal` with adaptive propagation enabled
+3. Embed watermark into `data/sample_video.mp4`
+4. Save results to the `outputs/` folder (both baseline and adaptive versions)
+5. Compare bit accuracy between baseline and adaptive models
 
+### Generated Outputs
 
+* `outputs/1.mp4` → Baseline watermarking result
+* `outputs/adaptive_1.mp4` → Adaptive watermarking result
+* `outputs/*.txt` → Reproducible payload bit data
 
-## 5. Evaluation Utilities
+## 4. Testing
 
-- `videoseal.evals.metrics.bit_accuracy`: bit-wise accuracy metric.
-- `detect_video()` in `src/main.py`: chunked video decoding + detection pipeline.
-- `inference_av.py --detect`: CLI detection.
-- Additional metrics (LPIPS, SSIM, PSNR) available via installed dependencies (`lpips`, `scikit-image`, `pytorch-msssim`).
+All major project components are validated through **pytest-based unit tests**, located in the `tests/` directory.
 
-## 6. Development Tips
+Run all tests:
 
-- Enable `pre-commit` to keep formatting consistent.
+```bash
+uv run pytest
+# or
+bash scripts/test.sh
+```
+
+The `conftest.py` file fixes a global random seed to ensure experiment reproducibility.
+
+## 5. Development Tips
+
+* Enable `pre-commit` to maintain consistent code style
+* Run `scripts/format.sh` regularly to auto-format and clean your code

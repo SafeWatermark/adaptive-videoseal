@@ -1,0 +1,113 @@
+# **Adaptive VideoSeal**
+
+<p align="left">
+    한국어 ｜ <a href="README.md">English</a>
+</p>
+
+**Adaptive VideoSeal**은 Meta의 VideoSeal 비디오 워터마킹 시스템을 기반으로,
+**adaptive 프레임 선택**, **워터마크 전파** 등를 추가한 확장 버전입니다.
+이 저장소에는 원본 VideoSeal, 연구용 노트북, 그리고 **재현 가능한 실험을 위한 Adaptive embedding 파이프라인**이 포함되어 있습니다.
+
+
+## 1. 개요 (Overview)
+
+* **Baseline VideoSeal**: 공식 비디오/오디오 워터마킹 추론 및 평가 코드.(`src/videoseal`)
+* **Adaptive pipeline**: `src/main.py`는 VideoSeal 기반으로 **adaptive 키프레임 선택 및 전파 로직**을 추가.
+* **체크포인트 (Checkpoints)**: 모델 가중치는 자동으로 다운로드되며, `ckpts/` 경로에 캐시됨.
+
+## 2. 환경 설정 (Environment Setup)
+
+### 2.1 사전 요구사항
+
+* Python 3.11
+* [FFmpeg](https://ffmpeg.org/) 이 `PATH` 환경변수에 등록되어 있어야 함
+* CUDA 환경에 맞게 컴파일된 PyTorch + torchvision
+
+---
+
+### 2.2 가상환경 생성
+
+
+```bash
+uv venv .venv --python 3.11
+source .venv/bin/activate # linux, mac
+uv sync
+```
+
+### 2.3 선택적 개발 도구
+
+```bash
+uv pip install pre-commit
+pre-commit install
+```
+
+* 커밋 전에 자동으로 **linting(ruff)** 및 **포맷팅 검사**를 수행합니다.
+
+### 2.4 코드 포맷팅
+
+```bash
+bash scripts/format.sh
+```
+
+* `src/` 내부의 코드 스타일을 검사 및 자동 수정
+* `src/videoseal/` 디렉터리는 검사에서 제외됩니다.
+
+## 3. 빠른 시작 (Quick Start)
+
+### 3.1 Video Scene Detector 소개
+
+AdaptiveVideoseal은 장면 변화(scene change)를 감지해 키프레임 선택 및 워터마크 전파를 최적화합니다.
+실험 시 --scene_detector 옵션을 통해 다양한 감지 방식을 선택할 수 있습니다.
+
+**Detector Types**
+
+| Detector      | Description                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------- |
+| **content**   | 프레임 간의 색상·채도·밝기(H, S, V) 변화를 기반으로 장면 전환을 감지합니다. 기본값이며, <br>PySceneDetect 프로젝트를 참고해 프레임별 RMSE(평균 픽셀 변화량)를 계산합니다. |
+| **histogram** | 프레임의 Y 히스토그램 분포 차이를 비교하여 장면 변화를 감지합니다.                                                                        |
+| **hash**      | 이미지 perception hash 기반으로 프레임 유사도를 계산하며, 빠른 장면 변화 검출에 적합합니다.                                                                 |
+
+추가 예정: adaptive thresholding video scene detector, [LPIPS](https://github.com/richzhang/PerceptualSimilarity),
+
+
+### 3.2 Adaptive watermarking 실험
+
+```bash
+bash scripts/run_content.sh # content_detector를 활용한 experiment 실행
+bash scripts/run_histogram.sh # histogram detector를 활용한 experiment 실행
+bash scripts/run_hash.sh # hash detector를 활용한 experiment 실행
+```
+
+### 실행 흐름
+
+1. **기본 VideoSeal 가중치 로드**
+2. `AdaptiveVideoseal` 인스턴스화 → adaptive propagation 활성화
+3. `data/sample_video.mp4`에 워터마크 삽입
+4. `outputs/` 폴더에 결과 저장 (기본 및 적응형 두 버전)
+5. 기본 모델 vs adaptive 모델 비트 정확도(bit accuracy) 비교 및 보고
+
+### 생성 결과
+
+* `outputs/1.mp4` → 기본 모델 워터마킹 결과
+* `outputs/adaptive_1.mp4` → 적응형 모델 워터마킹 결과
+* `outputs/*.txt` → 재현 가능한 페이로드 비트 저장
+
+## 4. test
+프로젝트의 주요 구성 요소는 모두 pytest 기반 단위 테스트로 검증됩니다.
+테스트 코드는 tests/ 디렉터리에 포함되어 있습니다.
+
+테스트 실행:
+```bash
+uv run pytest
+# 또는
+bash scripts/test.sh
+```
+
+conftest.py에서 모든 테스트의 랜덤 시드(seed) 를 고정하여
+재현 가능한 실험 환경을 유지합니다.
+
+
+## 5. 개발 팁 (Development Tips)
+
+* `pre-commit`을 활성화해 코드 스타일 일관성 유지
+* `scripts/format.sh` 실행으로 코드 자동 정리
