@@ -592,7 +592,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--compare_full_embed",
-        type="store_true",
+        action="store_true",
         default=False,
         help="If set, use model.step_size = 1 (embed all frames instead of skipping).",
     )
