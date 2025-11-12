@@ -218,9 +218,8 @@ def embed_video_clip(
     model: Videoseal, clip: np.ndarray, msgs: torch.Tensor
 ) -> np.ndarray:
     clip_tensor = (
-        torch.tensor(clip, dtype=torch.float32, device=clip.device).permute(0, 3, 1, 2)
-        / 255.0
-    )
+        torch.tensor(clip, dtype=torch.float32).permute(0, 3, 1, 2) / 255.0
+    ).to(model.device)
     outputs = model.embed(
         clip_tensor, msgs=msgs, is_video=True, lowres_attenuation=True
     )
