@@ -1,5 +1,5 @@
 import torch
-from src.scene_detectors.historgram_detector import HistogramDetector
+from src.scene_detectors.histogram_detector import HistogramDetector
 
 
 def test_calculate_norm_hist_zero():

@@ -18,7 +18,7 @@ from decorators import log_elapsed_time
 from scene_detectors.base import SceneDetector
 from scene_detectors.content_detector import ContentDetector
 from scene_detectors.hash_detector import HashDetector
-from scene_detectors.historgram_detector import HistogramDetector
+from scene_detectors.histogram_detector import HistogramDetector
 from utils import setup_seed, setup_logger, select_device
 import pandas as pd
 from datetime import datetime
