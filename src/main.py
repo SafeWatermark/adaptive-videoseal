@@ -24,6 +24,7 @@ import pandas as pd
 from datetime import datetime
 import argparse
 from scipy import stats
+import logging
 
 
 class _TempWorkingDir:
@@ -337,6 +338,14 @@ def detect_video(
         pbar.update(1)
         if frame_count % chunk_size == 0:
             soft_msgs.append(detect_video_clip(model, chunk))
+    if not soft_msgs:
+        logging.error(
+            "No frames processed. "
+            f"Ensure num_frames_for_extraction >= chunk_size and the video has enough frames. "
+            f"(num_frames_for_extraction={num_frames_for_extraction}, "
+            f"chunk_size={chunk_size}, total_video_frames={num_frames}, "
+        )
+        raise ValueError("No frames processed for watermark extraction.")
     process1.stdout.close()
     process1.wait()
 
@@ -355,6 +364,15 @@ def run_experiment(args):
     for key, value in vars(args).items():
         logger.info(f"{key:<20} : {value}")
     logger.info("====================================")
+
+    # warning inappropriate settings
+    if args.num_frames_for_extraction < args.chunk_size:
+        logger.warning(
+            "Detection will raise the error as extracted number of frames is less than chunk size.\n"
+            f"Ensure num_frames_for_extraction >= chunk_size and the video has enough frames.\n"
+            f"(num_frames_for_extraction={args.num_frames_for_extraction}, "
+            f"chunk_size={args.chunk_size}. "
+        )
 
     # Setup device
     device = select_device(args.device)
@@ -427,8 +445,10 @@ def run_experiment(args):
 
     # Experiment parameters
     n_trials = args.n_trials
-    num_frames_for_extraction = args.num_frames
-    bit_length = args.bit_length
+    num_frames_for_extraction = args.num_frames_for_extraction
+    chunk_size = args.chunk_size
+    model.chunk_size = chunk_size
+    adaptive_model.chunk_size = chunk_size
 
     bit_acc_list, adaptive_bit_acc_list = [], []
 
@@ -445,12 +465,12 @@ def run_experiment(args):
 
         logger.info("▶ [Adaptive Model] Embedding started...")
         adaptive_msgs_ori = embed_video(
-            adaptive_model, str(video_path), str(adaptive_output_path), bit_length
+            adaptive_model, str(video_path), str(adaptive_output_path), chunk_size
         )
         logger.info("✅ [Adaptive Model] Embedding completed.")
 
         logger.info("▶ [VideoSeal Model] Embedding started...")
-        msgs_ori = embed_video(model, str(video_path), str(output_path), bit_length)
+        msgs_ori = embed_video(model, str(video_path), str(output_path), chunk_size)
         logger.info("✅ [VideoSeal Model] Embedding completed.")
 
         logger.info("🔍 [Adaptive Model] Detection started...")
@@ -458,13 +478,13 @@ def run_experiment(args):
             adaptive_model,
             str(adaptive_output_path),
             num_frames_for_extraction,
-            bit_length,
+            chunk_size,
         )
         logger.info("✅ [Adaptive Model] Detection completed.")
 
         logger.info("🔍 [VideoSeal Model] Detection started...")
         soft_msgs = detect_video(
-            model, str(output_path), num_frames_for_extraction, bit_length
+            model, str(output_path), num_frames_for_extraction, chunk_size
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
 
@@ -497,13 +517,13 @@ def run_experiment(args):
 
             logger.info("▶ [VideoSeal(Full Embedding) Model] Embedding started...")
             full_msgs_ori = embed_video(
-                model, str(video_path), str(full_output_path), bit_length
+                model, str(video_path), str(full_output_path), chunk_size
             )
             logger.info("✅ [VideoSeal(Full Embedding) Model] Embedding completed.")
 
             logger.info("🔍 [VideoSeal(Full Embedding) Model] Detection started...")
             full_soft_msgs = detect_video(
-                model, str(full_output_path), num_frames_for_extraction, bit_length
+                model, str(full_output_path), num_frames_for_extraction, chunk_size
             )
             logger.info("✅ [VideoSeal(Full Embedding) Model] Detection completed.")
 
@@ -575,10 +595,16 @@ if __name__ == "__main__":
         "--n_trials", type=int, default=30, help="Number of experiment repetitions"
     )
     parser.add_argument(
-        "--num_frames", type=int, default=32, help="Number of frames for extraction"
+        "--num_frames_for_extraction",
+        type=int,
+        default=32,
+        help="Number of frames for extraction",
     )
     parser.add_argument(
-        "--bit_length", type=int, default=16, help="Length of embedded bit sequence"
+        "--chunk_size",
+        type=int,
+        default=32,
+        help="Number of video frames to process in a single batch for watermark embedding",
     )
     parser.add_argument(
         "--step_size", type=int, default=8, help="Step size parameter for embedding"
