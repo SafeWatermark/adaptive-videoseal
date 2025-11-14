@@ -14,6 +14,7 @@ class HashDetector(SceneDetector):
         threshold: float = 0.395,
         size: int = 16,
         lowpass: int = 2,
+        **kwargs,
     ):
         # threshold: sensitivity for detecting scene change
         # size: hash block size (smaller = coarser)

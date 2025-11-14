@@ -16,9 +16,7 @@ from videoseal.utils.cfg import setup_model_from_model_card
 
 from decorators import log_elapsed_time
 from scene_detectors.base import SceneDetector
-from scene_detectors.content_detector import ContentDetector
-from scene_detectors.hash_detector import HashDetector
-from scene_detectors.histogram_detector import HistogramDetector
+from scene_detectors.registry import detector_registry
 from utils import setup_seed, setup_logger, select_device
 import pandas as pd
 from datetime import datetime
@@ -195,7 +193,7 @@ class AdaptiveVideoseal(Videoseal):
 
             # calculate distance and thresholding
             if not hasattr(self, "scene_detector"):
-                self.set_scene_detector(ContentDetector())
+                self.set_scene_detector(detector_registry["default"]())
             distinct_ids = self.scene_detector.detect_key_frames(all_imgs_res)
 
             base_ids = torch.arange(
@@ -484,13 +482,9 @@ def run_experiment(args):
     adaptive_model.__dict__.update(model.__dict__)
 
     # --- Scene detector selection ---
-    if args.scene_detector == "histogram":
-        scene_detector = HistogramDetector()
-    elif args.scene_detector == "content":
-        scene_detector = ContentDetector()
-    elif args.scene_detector == "hash":
-        scene_detector = HashDetector()
-    else:
+    try:
+        scene_detector = detector_registry[args.scene_detector](device=args.device)
+    except KeyError:
         raise ValueError(f"Unknown scene detector: {args.scene_detector}")
 
     adaptive_model.set_scene_detector(scene_detector)
@@ -623,8 +617,8 @@ if __name__ == "__main__":
         "--scene_detector",
         type=str,
         default="content",
-        choices=["content", "histogram", "hash"],
-        help="Select the scene detector type: 'content', 'histogram' or 'hash'.",
+        choices=["content", "histogram", "hash", "lpips"],
+        help="Select the scene detector type: 'content', 'histogram', 'hash' or 'lpips'.",
     )
     parser.add_argument(
         "--device",

@@ -8,7 +8,7 @@ from videoseal.data.transforms import RGB2YUV
 class HistogramDetector(SceneDetector):
     """based on https://github.com/Breakthrough/PySceneDetect"""
 
-    def __init__(self, threshold: float = 0.05, bins: int = 256):
+    def __init__(self, threshold: float = 0.05, bins: int = 256, **kwargs):
         # Internally, threshold represents the correlation between two histograms and has values
         # between -1.0 and 1.0.
         self.threshold = max(0.0, min(1.0, 1.0 - threshold))
