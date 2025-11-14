@@ -14,6 +14,18 @@ from videoseal.evals.metrics import bit_accuracy
 from videoseal.models import Videoseal
 from videoseal.utils.cfg import setup_model_from_model_card
 
+from decorators import log_elapsed_time
+from scene_detectors.base import SceneDetector
+from scene_detectors.content_detector import ContentDetector
+from scene_detectors.hash_detector import HashDetector
+from scene_detectors.histogram_detector import HistogramDetector
+from utils import setup_seed, setup_logger, select_device
+import pandas as pd
+from datetime import datetime
+import argparse
+from scipy import stats
+import logging
+
 
 class _TempWorkingDir:
     def __init__(self, path: Path):
@@ -55,6 +67,12 @@ def get_video_info(input_path):
 
 
 class AdaptiveVideoseal(Videoseal):
+    def set_scene_detector(self, scene_detector: SceneDetector):
+        self.scene_detector = scene_detector
+
+    def set_logger(self, logger):
+        self.logger = logger
+
     @staticmethod
     def _apply_video_mode(
         preds_w: torch.Tensor,
@@ -75,7 +93,6 @@ class AdaptiveVideoseal(Videoseal):
 
         # repeat each prediction for step_size frames
         preds_w = torch.repeat_interleave(preds_w, step_size, dim=0)
-        print(f"step_size: {step_size}")
         return preds_w[:total_frames]
 
     @torch.no_grad()
@@ -106,7 +123,6 @@ class AdaptiveVideoseal(Videoseal):
             msgs = self.get_random_msg()  # 1 x k
         else:
             assert msgs.shape[0] == 1, "Message should be unique"
-        # msgs = msgs.repeat(self.chunk_size, 1)  # 1 k -> n k
 
         # encode by chunk of cksz imgs, propagate the wm to spsz next imgs
         chunk_size = self.chunk_size  # n=cksz
@@ -120,9 +136,6 @@ class AdaptiveVideoseal(Videoseal):
             end = start + nimgs_in_ck * step_size
             all_imgs_in_ck = imgs[start:end, ...]
 
-            # if nimgs_in_ck < chunk_size:
-            #   msgs = msgs[:nimgs_in_ck]
-
             # interpolate
             all_imgs_res = all_imgs_in_ck.clone()
             if all_imgs_res.shape[-2:] != (self.img_size, self.img_size):
@@ -131,17 +144,11 @@ class AdaptiveVideoseal(Videoseal):
                 )
             all_imgs_res = all_imgs_res.to(self.device)
 
-            # choose one frame every step_size
-            # imgs_res = all_imgs_res[::step_size]
-
             # calculate distance and thresholding
-            dist = torch.sqrt(
-                torch.mean((all_imgs_res[1:] - all_imgs_res[:-1]) ** 2, dim=(1, 2, 3))
-            )
+            if not hasattr(self, "scene_detector"):
+                self.set_scene_detector(ContentDetector())
+            distinct_ids = self.scene_detector.detect_key_frames(all_imgs_res)
 
-            # TODO: set default threshold differently
-            threshold = 0.05
-            distinct_ids = torch.where(dist > threshold)[0] + 1
             base_ids = torch.arange(
                 0, all_imgs_res.size(0), step_size, device=imgs.device
             )
@@ -165,6 +172,9 @@ class AdaptiveVideoseal(Videoseal):
             repeat_msgs = msgs.repeat(key_frame_ids.size(0), 1)
 
             preds_w = self.embedder(imgs_res, repeat_msgs.to(self.device))
+
+            if hasattr(self, "logger"):
+                self.logger.info(f"adaptive step size: {repeats}")
 
             preds_w = self._apply_video_mode(
                 preds_w, len(all_imgs_in_ck), repeats, self.video_mode
@@ -204,13 +214,13 @@ class AdaptiveVideoseal(Videoseal):
         return outputs
 
 
+@log_elapsed_time()
 def embed_video_clip(
     model: Videoseal, clip: np.ndarray, msgs: torch.Tensor
 ) -> np.ndarray:
     clip_tensor = (
-        torch.tensor(clip, dtype=torch.float32, device=device).permute(0, 3, 1, 2)
-        / 255.0
-    )
+        torch.tensor(clip, dtype=torch.float32).permute(0, 3, 1, 2) / 255.0
+    ).to(model.device)
     outputs = model.embed(
         clip_tensor, msgs=msgs, is_video=True, lowres_attenuation=True
     )
@@ -219,6 +229,7 @@ def embed_video_clip(
     return processed_clip
 
 
+@log_elapsed_time()
 def embed_video(
     model: Videoseal, input_path: str, output_path: str, chunk_size: int, crf: int = 23
 ) -> None:
@@ -327,6 +338,14 @@ def detect_video(
         pbar.update(1)
         if frame_count % chunk_size == 0:
             soft_msgs.append(detect_video_clip(model, chunk))
+    if not soft_msgs:
+        logging.error(
+            "No frames processed. "
+            f"Ensure num_frames_for_extraction >= chunk_size and the video has enough frames. "
+            f"(num_frames_for_extraction={num_frames_for_extraction}, "
+            f"chunk_size={chunk_size}, total_video_frames={num_frames}, "
+        )
+        raise ValueError("No frames processed for watermark extraction.")
     process1.stdout.close()
     process1.wait()
 
@@ -335,16 +354,48 @@ def detect_video(
     return soft_msgs
 
 
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def run_experiment(args):
+    """Main experiment runner with logging, seeding, and reproducibility."""
+    log_dir = Path(args.output_dir) / "logs"
 
-    # Load the VideoSeal model
+    logger = setup_logger(log_dir)
+
+    logger.info("===== Experiment Configuration =====")
+    for key, value in vars(args).items():
+        logger.info(f"{key:<20} : {value}")
+    logger.info("====================================")
+
+    # warning inappropriate settings
+    if args.num_frames_for_extraction < args.chunk_size:
+        logger.warning(
+            "Detection will raise the error as extracted number of frames is less than chunk size.\n"
+            f"Ensure num_frames_for_extraction >= chunk_size and the video has enough frames.\n"
+            f"(num_frames_for_extraction={args.num_frames_for_extraction}, "
+            f"chunk_size={args.chunk_size}. "
+        )
+
+    # Setup device
+    device = select_device(args.device)
+    logger.info(f"Using device: {device}")
+
+    # Set seed
+    setup_seed(args.seed)
+    logger.info(f"Random seed set to: {args.seed}")
+
+    # Prepare directories
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Input dir: {input_dir}")
+    logger.info(f"Output dir: {output_dir}")
+
+    # Fixed model paths
     cards_dir = Path(__file__).resolve().parent / "videoseal" / "videoseal" / "cards"
     model_card_path = cards_dir / "videoseal_1.0.yaml"
     if not model_card_path.exists():
-        raise FileNotFoundError(
-            f"Expected model card at {model_card_path}, but it was not found."
-        )
+        raise FileNotFoundError(f"Expected model card at {model_card_path}")
+
     cards_root = cards_dir.parent.parent
     target_ckpt_dir = cards_root / "ckpts"
     target_ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -355,59 +406,222 @@ if __name__ == "__main__":
         not target_ckpt.exists() or target_ckpt.stat().st_size < 100_000_000
     ) and source_ckpt.exists():
         shutil.copy2(source_ckpt, target_ckpt)
+        logger.info("Copied checkpoint file to target directory.")
 
+    # Load model (assuming your existing function)
     with _TempWorkingDir(cards_dir.parent.parent):
         model = setup_model_from_model_card(model_card_path)
-
-    model = model.eval()
-    model = model.to(device)
+    model = model.eval().to(device)
     model.compile()
 
-    # Setup the step size. Bigger step size makes embedding faster but loses a bit of robustness.
-    model.step_size = 1
-    # model.step_size = 8
+    # Configuration
+    model.step_size = args.step_size
+    model.blender.scaling_w *= args.scaling_w
 
-    model.blender.scaling_w *= 1.5  # imperceptibility/robustness trade-off
+    # Adaptive model setup
 
     adaptive_model = AdaptiveVideoseal(model.embedder, model.detector, model.augmenter)
     adaptive_model.load_state_dict(model.state_dict(), strict=False)
     adaptive_model.__dict__.update(model.__dict__)
-    adaptive_model.eval()
-    adaptive_model = adaptive_model.to(device)
+
+    # --- Scene detector selection ---
+    if args.scene_detector == "histogram":
+        scene_detector = HistogramDetector()
+    elif args.scene_detector == "content":
+        scene_detector = ContentDetector()
+    elif args.scene_detector == "hash":
+        scene_detector = HashDetector()
+    else:
+        raise ValueError(f"Unknown scene detector: {args.scene_detector}")
+
+    adaptive_model.set_scene_detector(scene_detector)
+    adaptive_model.set_logger(logger)
+    adaptive_model.eval().to(device)
     adaptive_model.compile()
 
-    adaptive_model.step_size = 8
-    adaptive_model.blender.scaling_w *= 1.5
+    adaptive_model.step_size = args.step_size
+    adaptive_model.blender.scaling_w *= args.scaling_w
     adaptive_model.attenuation = model.attenuation
 
-    # Path to the input video
-    video_path = "./data/sample_movie.mp4"
+    # Experiment parameters
+    n_trials = args.n_trials
+    num_frames_for_extraction = args.num_frames_for_extraction
+    chunk_size = args.chunk_size
+    model.chunk_size = chunk_size
+    adaptive_model.chunk_size = chunk_size
 
-    # Create the output directory and path
-    output_dir = "./outputs"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, os.path.basename(video_path))
-    adaptive_output_path = os.path.join(
-        output_dir, "adaptive_" + os.path.basename(video_path)
+    bit_acc_list, adaptive_bit_acc_list = [], []
+
+    logger.info(f"Starting {n_trials} trials...")
+
+    for i in range(n_trials):
+        logger.info(f"\n===== Trial {i + 1}/{n_trials} =====")
+
+        video_path = input_dir / args.video_filename
+        output_path = output_dir / f"trial{i + 1}_{args.video_filename}"
+        adaptive_output_path = (
+            output_dir / f"adaptive_trial{i + 1}_{args.video_filename}"
+        )
+
+        logger.info("▶ [Adaptive Model] Embedding started...")
+        adaptive_msgs_ori = embed_video(
+            adaptive_model, str(video_path), str(adaptive_output_path), chunk_size
+        )
+        logger.info("✅ [Adaptive Model] Embedding completed.")
+
+        logger.info("▶ [VideoSeal Model] Embedding started...")
+        msgs_ori = embed_video(model, str(video_path), str(output_path), chunk_size)
+        logger.info("✅ [VideoSeal Model] Embedding completed.")
+
+        logger.info("🔍 [Adaptive Model] Detection started...")
+        adaptive_soft_msgs = detect_video(
+            adaptive_model,
+            str(adaptive_output_path),
+            num_frames_for_extraction,
+            chunk_size,
+        )
+        logger.info("✅ [Adaptive Model] Detection completed.")
+
+        logger.info("🔍 [VideoSeal Model] Detection started...")
+        soft_msgs = detect_video(
+            model, str(output_path), num_frames_for_extraction, chunk_size
+        )
+        logger.info("✅ [VideoSeal Model] Detection completed.")
+
+        adaptive_bit_acc = (
+            bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
+        )
+        bit_acc = bit_accuracy(soft_msgs, msgs_ori).item() * 100
+
+        logger.info(
+            f"bit_acc = {bit_acc:.2f}%, adaptive_bit_acc = {adaptive_bit_acc:.2f}%"
+        )
+
+        adaptive_bit_acc_list.append(adaptive_bit_acc)
+        bit_acc_list.append(bit_acc)
+
+    results = {
+        "trial": np.arange(1, n_trials + 1),
+        "bit_acc": bit_acc_list,
+        "adaptive_bit_acc": adaptive_bit_acc_list,
+    }
+    # TODO: [Refactor] seperate full embedding measurement
+    if args.compare_full_embed:
+        model.step_size = 1
+        full_embed_bit_acc_list = []
+        for i in range(n_trials):
+            logger.info(f"\n===== Trial {i + 1}/{n_trials} =====")
+
+            video_path = input_dir / args.video_filename
+            full_output_path = output_dir / f"full_trial{i + 1}_{args.video_filename}"
+
+            logger.info("▶ [VideoSeal(Full Embedding) Model] Embedding started...")
+            full_msgs_ori = embed_video(
+                model, str(video_path), str(full_output_path), chunk_size
+            )
+            logger.info("✅ [VideoSeal(Full Embedding) Model] Embedding completed.")
+
+            logger.info("🔍 [VideoSeal(Full Embedding) Model] Detection started...")
+            full_soft_msgs = detect_video(
+                model, str(full_output_path), num_frames_for_extraction, chunk_size
+            )
+            logger.info("✅ [VideoSeal(Full Embedding) Model] Detection completed.")
+
+            full_embed_bit_acc = (
+                bit_accuracy(full_soft_msgs, full_msgs_ori).item() * 100
+            )
+
+            logger.info(f"full embedding bit acc = {full_embed_bit_acc:.2f}%.")
+
+            full_embed_bit_acc_list.append(full_embed_bit_acc)
+        results["full_embedding_bit_acc"] = full_embed_bit_acc_list
+
+    # Save results
+    results = pd.DataFrame(results)
+    results_path = (
+        output_dir / f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    results.to_csv(results_path, index=False)
+    logger.info(f"\n✅ Experiment completed! Results saved to {results_path}")
+
+    logger.info("\n===== stats summarization =====")
+    logger.info("\n" + str(results.describe()))
+
+    t_stat, p_val = stats.ttest_rel(results["adaptive_bit_acc"], results["bit_acc"])
+    logger.info(f"\nPaired t-test result: t = {t_stat:.3f}, p = {p_val:.5f}")
+
+    if p_val < 0.05:
+        logger.info("→ There is meaningful difference (p < 0.05)")
+    else:
+        logger.info("→ There isn't meaningful difference (p >= 0.05)")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Automated VideoSeal experiment setup")
+
+    parser.add_argument(
+        "--scene_detector",
+        type=str,
+        default="content",
+        choices=["content", "histogram", "hash"],
+        help="Select the scene detector type: 'content', 'histogram' or 'hash'.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help="Device selection",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--input_dir", type=str, default="./data", help="Input directory for videos"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./outputs",
+        help="Output directory for results",
+    )
+    parser.add_argument(
+        "--video_filename",
+        type=str,
+        default="sample_movie.mp4",
+        help="Name of input video file",
+    )
+    parser.add_argument(
+        "--n_trials", type=int, default=30, help="Number of experiment repetitions"
+    )
+    parser.add_argument(
+        "--num_frames_for_extraction",
+        type=int,
+        default=32,
+        help="Number of frames for extraction",
+    )
+    parser.add_argument(
+        "--chunk_size",
+        type=int,
+        default=32,
+        help="Number of video frames to process in a single batch for watermark embedding",
+    )
+    parser.add_argument(
+        "--step_size", type=int, default=8, help="Step size parameter for embedding"
+    )
+    parser.add_argument(
+        "--scaling_w",
+        type=float,
+        default=1.5,
+        help="Scaling weight for watermark blending",
+    )
+    parser.add_argument(
+        "--compare_full_embed",
+        action="store_true",
+        default=False,
+        help="If set, use model.step_size = 1 (embed all frames instead of skipping).",
     )
 
-    # Embed the watermark inside the video with a random msg
+    args = parser.parse_args()
 
-    adaptive_msgs_ori = embed_video(
-        adaptive_model, video_path, adaptive_output_path, 16
-    )
-    msgs_ori = embed_video(model, video_path, output_path, 16)
-
-    print(f"\nSaved watermarked video to {output_path}")
-    print(f"\nSaved watermarked video to {adaptive_output_path}")
-
-    # Detect the watermark
-    num_frames_for_extraction = 32
-    soft_msgs = detect_video(model, output_path, num_frames_for_extraction, 16)
-    adaptive_soft_msgs = detect_video(
-        adaptive_model, adaptive_output_path, num_frames_for_extraction, 16
-    )
-    bit_acc = bit_accuracy(soft_msgs, msgs_ori).item() * 100
-    adaptive_bit_acc = bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
-    print(f"\nBinary message extracted with {bit_acc:.1f}% bit accuracy")
-    print(f"\nBinary message extracted with {adaptive_bit_acc:.1f}% bit accuracy")
+    run_experiment(args)
