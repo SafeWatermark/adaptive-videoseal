@@ -85,14 +85,63 @@ class AdaptiveVideoseal(Videoseal):
         args:
             preds_w (torch.Tensor): predictions for key frames [n, c, h, w]
             total_frames (int): total number of frames to generate
-            step_size (int): number of frames between key frames
-            video_mode (str): the video mode to use. can be one of "alternate", "repeat", "interpolate"
+            step_size (torch.Tensor): number of frames between key frames
+            video_mode (str): the video mode to use. can be one of "repeat", "alternate", "interpolate"
         returns:
             torch.Tensor: expanded predictions [total_frames, c, h, w]
         """
-
         # repeat each prediction for step_size frames
-        preds_w = torch.repeat_interleave(preds_w, step_size, dim=0)
+        if video_mode == "repeat":
+            preds_w = torch.repeat_interleave(preds_w, step_size, dim=0)
+        elif video_mode == "alternate":
+            full_size = (total_frames,) + preds_w.shape[1:]  # f c h w
+            full_preds = torch.zeros(full_size, device=preds_w.device)  # f c h w
+            key_frame_ids = torch.cumsum(
+                torch.cat(
+                    [torch.tensor([0], device=step_size.device), step_size], dim=0
+                ),
+                dim=0,
+            )[:-1]
+            full_preds[key_frame_ids] = preds_w  # place preds_w [n c h w] in key frames
+            preds_w = full_preds  # f c h w
+        # TODO: Vectorize for speed
+        elif video_mode == "interpolate":
+            # interpolate between predictions
+            full_size = (total_frames,) + preds_w.shape[1:]  # f c h w
+            full_preds = torch.zeros(full_size, device=preds_w.device)  # f c h w
+            # interpolation factors
+            alphas = []
+            for i, interval in enumerate(step_size[:-1]):
+                if i < step_size[:-1].size(0) - 1:
+                    alpha = 1 - torch.linspace(
+                        0, 1, steps=interval + 1, device=preds_w.device
+                    )
+                    alphas.append(alpha[:-1])
+                else:
+                    alpha = 1 - torch.linspace(
+                        0, 1, steps=interval, device=preds_w.device
+                    )
+                    alphas.append(alpha)
+            if len(alphas) == 0:
+                # if there is only 1 key frame, interpolation is inappropriate. Change to "repeat" mode
+                preds_w = torch.repeat_interleave(preds_w, step_size, dim=0)
+                return preds_w
+            alphas = torch.cat(alphas, dim=0).view(-1, 1, 1, 1)
+            # key frames and shifted key frames
+            start_frames = torch.repeat_interleave(preds_w[:-1], step_size[:-1], dim=0)
+            end_frames = torch.repeat_interleave(preds_w[1:], step_size[:-1], dim=0)
+            # interpolate between key frames and shifted
+            interpolated_preds = (
+                alphas * start_frames + (1 - alphas) * end_frames
+            )  # (f-1)//step c h w
+            # fill the rest of the frames with the last ones
+            last_start = len(interpolated_preds)
+            full_preds[:last_start] = interpolated_preds
+            full_preds[last_start:] = preds_w[
+                -1
+            ]  # use last prediction for remaining frames
+            preds_w = full_preds  # f c h w
+
         return preds_w[:total_frames]
 
     @torch.no_grad()
@@ -417,6 +466,7 @@ def run_experiment(args):
     # Configuration
     model.step_size = args.step_size
     model.blender.scaling_w *= args.scaling_w
+    model.video_mode = args.video_mode
 
     # Adaptive model setup
 
@@ -442,6 +492,7 @@ def run_experiment(args):
     adaptive_model.step_size = args.step_size
     adaptive_model.blender.scaling_w *= args.scaling_w
     adaptive_model.attenuation = model.attenuation
+    adaptive_model.video_mode = args.video_mode
 
     # Experiment parameters
     n_trials = args.n_trials
@@ -620,6 +671,18 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="If set, use model.step_size = 1 (embed all frames instead of skipping).",
+    )
+    parser.add_argument(
+        "--video_mode",
+        type=str,
+        default="repeat",
+        choices=["repeat", "alternate", "interpolate"],
+        help=(
+            "Video mode for expanding key-frame predictions across all frames. "
+            "'repeat' — copy each key-frame prediction to its repeated frames; "
+            "'alternate' — apply predictions only on key frames; "
+            "'interpolate' — interpolate predictions between key frames."
+        ),
     )
 
     args = parser.parse_args()
