@@ -52,6 +52,7 @@ class ContentDetector(SceneDetector):
         self,
         threshold: float = 27.0,
         weights: ComponentWeights = ComponentWeights(),
+        **kwargs,
     ):
         self.threshold = threshold
         self.weights = weights

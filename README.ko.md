@@ -66,16 +66,17 @@ AdaptiveVideoseal은 장면 변화(scene change)를 감지해 키프레임 선�
 | **content**   | 프레임 간의 색상·채도·밝기(H, S, V) 변화를 기반으로 장면 전환을 감지합니다. 기본값이며, <br>PySceneDetect 프로젝트를 참고해 프레임별 RMSE(평균 픽셀 변화량)를 계산합니다. |
 | **histogram** | 프레임의 Y 히스토그램 분포 차이를 비교하여 장면 변화를 감지합니다.                                                                        |
 | **hash**      | 이미지 perception hash 기반으로 프레임 유사도를 계산하며, 빠른 장면 변화 검출에 적합합니다.                                                                 |
+| **lpips**    | 딥러닝 기반 지각적 유사도 지표(LPIPS) 를 사용해 연속 프레임 간의 ‘지각적 차이’를 기반으로 장면 전환을 감지합니다. |
 
-추가 예정: adaptive thresholding video scene detector, [LPIPS](https://github.com/richzhang/PerceptualSimilarity),
 
 
 ### 3.2 Adaptive watermarking 실험
 
 ```bash
-bash scripts/run_content.sh # content_detector를 활용한 experiment 실행
-bash scripts/run_histogram.sh # histogram detector를 활용한 experiment 실행
-bash scripts/run_hash.sh # hash detector를 활용한 experiment 실행
+bash scripts/run_content_detector.sh # content_detector를 활용한 experiment 실행
+bash scripts/run_histogram_detector.sh # histogram detector를 활용한 experiment 실행
+bash scripts/run_hash_detector.sh # hash detector를 활용한 experiment 실행
+bash scripts/run_lpips_detector.sh # lpips detector를 활용한 experiment 실행
 ```
 
 ### 실행 흐름
