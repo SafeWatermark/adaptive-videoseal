@@ -13,4 +13,5 @@ python "$EXPERIMENT_SCRIPT" \
   --num_frames_for_extraction 32 \
   --chunk_size 16 \
   --step_size 8 \
-  --scaling_w 1.5
+  --scaling_w 1.5 \
+  --video_mode "repeat"
