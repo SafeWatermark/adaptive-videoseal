@@ -275,18 +275,27 @@ def embed_video(
     frame_size = width * height * 3
     chunk = np.zeros((chunk_size, height, width, 3), dtype=np.uint8)
     frame_count = 0
+    frames_in_chunk = 0
     pbar = tqdm(total=num_frames, desc="Watermark embedding")
     while True:
         in_bytes = process1.stdout.read(frame_size)
         if not in_bytes:
             break
         frame = np.frombuffer(in_bytes, np.uint8).reshape([height, width, 3])
-        chunk[frame_count % chunk_size] = frame
+        chunk[frames_in_chunk] = frame
+        frames_in_chunk += 1
         frame_count += 1
         pbar.update(1)
-        if frame_count % chunk_size == 0:
+        if frames_in_chunk == chunk_size:
             processed_frame = embed_video_clip(model, chunk, msgs)
             process2.stdin.write(processed_frame.tobytes())
+            frames_in_chunk = 0
+
+    # Process final partial chunk if any
+    if frames_in_chunk > 0:
+        processed_frame = embed_video_clip(model, chunk[:frames_in_chunk], msgs)
+        process2.stdin.write(processed_frame.tobytes())
+
     process1.stdout.close()
     process2.stdin.close()
     process1.wait()
