@@ -48,6 +48,8 @@ def test_repeat_mode(
         preds_w, total_frames=total_frames, step_size=step_size, video_mode="repeat"
     )
 
+    assert repeated_w.size(0) == total_frames
+    assert repeated_w.dtype == preds_w.dtype
     assert (
         repeated_w.squeeze().tolist() == expected_result
     ), f"expected result: {expected_result}, got: {repeated_w.squeeze().tolist()}"
@@ -115,6 +117,8 @@ def test_alternate_mode(
         preds_w, total_frames=total_frames, step_size=step_size, video_mode="alternate"
     )
 
+    assert alternated_w.size(0) == total_frames
+    assert alternated_w.dtype == preds_w.dtype
     assert (
         alternated_w.squeeze().tolist() == expected_result
     ), f"expected result: {expected_result}, got: {alternated_w.squeeze().tolist()}"
@@ -184,13 +188,15 @@ def test_interpolate_mode(
     """
     total_frames = step_size.sum().item()
 
-    interpolated_watermarks = AdaptiveVideoseal._apply_video_mode(
+    interpolated_w = AdaptiveVideoseal._apply_video_mode(
         preds_w,
         total_frames=total_frames,
         step_size=step_size,
         video_mode="interpolate",
     )
 
+    assert interpolated_w.size(0) == total_frames
+    assert interpolated_w.dtype == preds_w.dtype
     assert torch.allclose(
-        interpolated_watermarks.squeeze(), torch.tensor(expected_result)
-    ), f"expected result: {expected_result}, got: {interpolated_watermarks.squeeze().tolist()}"
+        interpolated_w.squeeze(), torch.tensor(expected_result)
+    ), f"expected result: {expected_result}, got: {interpolated_w.squeeze().tolist()}"
