@@ -62,15 +62,15 @@ During experiments, you can choose a detection method using the `--scene_detecto
 | **content**   | Detects scene changes based on variations in color, saturation, and brightness (H, S, V). Default option. Inspired by the PySceneDetect project, it computes frame-to-frame RMSE (mean pixel difference). |
 | **histogram** | Detects scene changes by comparing differences in Y-channel histogram distributions between frames.                                                                                                       |
 | **hash**      | Uses perceptual image hashes to measure frame similarity—fast and effective for detecting abrupt scene changes.                                                                                           |
-
-Upcoming features: adaptive thresholding scene detector, [LPIPS](https://github.com/richzhang/PerceptualSimilarity)-based similarity metric.
+| **lpips** | Detects scene changes based on the perceptual difference between consecutive frames using the deep-learning–based LPIPS metric. |
 
 ### 3.2 Adaptive Watermarking Experiment
 
 ```bash
-bash scripts/run_content.sh     # Run experiment using the content-based detector
-bash scripts/run_histogram.sh   # Run experiment using the histogram-based detector
-bash scripts/run_hash.sh        # Run experiment using the hash-based detector
+bash scripts/run_content_detector.sh     # Run experiment using the content-based detector
+bash scripts/run_histogram_detector.sh   # Run experiment using the histogram-based detector
+bash scripts/run_hash_detector.sh        # Run experiment using the hash-based detector
+bash scripts/run_lpips_detector.sh        # Run experiment using the lpips detector
 ```
 
 ### Execution Flow
