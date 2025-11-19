@@ -1,4 +1,4 @@
-from src.main import AdaptiveVideoseal
+from src.adaptive_models.adaptive_videoseal import AdaptiveVideoseal
 import torch
 import pytest
 
