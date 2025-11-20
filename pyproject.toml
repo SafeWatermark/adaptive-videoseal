@@ -51,3 +51,10 @@ source = ["src"]
 omit = [
     "src/videoseal/*"
 ]
+
+
+[tool.ruff]
+exclude = [
+    "src/videoseal",
+    "src/notebooks",
+]
