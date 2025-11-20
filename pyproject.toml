@@ -9,6 +9,7 @@ description = "Adaptive Video Watermark Propagation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "videoseal @ git+https://github.com/facebookresearch/videoseal.git",
     "av>=16.0.1",
     "calflops>=0.3.2",
     "einops>=0.8.1",

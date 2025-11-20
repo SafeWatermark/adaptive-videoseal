@@ -42,8 +42,6 @@ jobs:
         run: |
           sudo apt-get install -y ffmpeg
 
-      - name: Start SSH session
-        uses: mxschmitt/action-tmate@v3
       # - name: Lint
       #   run: uv run bash scripts/format.sh
 
