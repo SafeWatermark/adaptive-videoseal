@@ -29,24 +29,24 @@ jobs:
         run: uv sync --frozen
 
       - name: Install OpenCV dependencies
-        run: sudo apt-get update && sudo apt-get install -y \
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
             libgl1 \
             libglib2.0-0 \
             libsm6 \
             libxext6 \
             libxrender1
 
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get install -y ffmpeg
+
       # - name: Lint
       #   run: uv run bash scripts/format.sh
 
       - name: Run tests
         run: uv run bash scripts/test.sh
-
-      - name: Store coverage files
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-html
-          path: htmlcov
 
   # https://github.com/marketplace/actions/alls-green#why
   alls-green:
