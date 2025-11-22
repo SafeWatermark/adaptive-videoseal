@@ -136,9 +136,8 @@ class AdaptiveVideoseal(Videoseal):
             if not hasattr(self, "scene_detector"):
                 self.set_scene_detector(detector_registry["default"]())
             distinct_ids = self.scene_detector.detect_key_frames(all_imgs_res)
-
             base_ids = torch.arange(
-                0, all_imgs_res.size(0), step_size, device=imgs.device
+                0, all_imgs_res.size(0), step_size, device=self.device
             )
 
             key_frame_ids = torch.cat([base_ids, distinct_ids])
@@ -147,7 +146,7 @@ class AdaptiveVideoseal(Videoseal):
             temp = torch.cat(
                 [
                     key_frame_ids,
-                    torch.tensor([all_imgs_res.size(0)], device=imgs.device),
+                    torch.tensor([all_imgs_res.size(0)], device=self.device),
                 ]
             )
             repeats = temp[1:] - temp[:-1]

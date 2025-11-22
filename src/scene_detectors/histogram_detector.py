@@ -8,13 +8,17 @@ from videoseal.data.transforms import RGB2YUV
 class HistogramDetector(SceneDetector):
     """based on https://github.com/Breakthrough/PySceneDetect"""
 
-    def __init__(self, threshold: float = 0.05, bins: int = 256, **kwargs):
+    def __init__(
+        self, threshold: float = 0.05, bins: int = 256, device: str = "auto", **kwargs
+    ):
         # Internally, threshold represents the correlation between two histograms and has values
         # between -1.0 and 1.0.
         self.threshold = max(0.0, min(1.0, 1.0 - threshold))
         self.bins = bins
         self._metric_key = f"hist_diff [bins={self.bins}]"
-        self.rgb2yuv = RGB2YUV()
+        if device == "auto":
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.rgb2yuv = RGB2YUV().to(device)
 
     def detect_key_frames(self, frames: torch.Tensor) -> torch.Tensor:
         hist = self.calculate_histogram(frames, bins=self.bins)
