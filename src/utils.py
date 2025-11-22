@@ -6,9 +6,9 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import sys
-import os
-import shutil
 from videoseal.utils.cfg import setup_model_from_model_card
+
+import torch.nn as nn
 
 
 def setup_seed(seed: int):
@@ -61,40 +61,7 @@ def select_device(device_choice: str):
     return device
 
 
-class _TempWorkingDir:
-    def __init__(self, path: Path):
-        self._path = Path(path)
-        self._prev = None
-
-    def __enter__(self):
-        self._prev = Path.cwd()
-        os.chdir(self._path)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._prev is not None:
-            os.chdir(self._prev)
-
-
-def get_videoseal():
-    cards_dir = Path(__file__).resolve().parent / "videoseal" / "videoseal" / "cards"
-    model_card_path = cards_dir / "videoseal_1.0.yaml"
-    if not model_card_path.exists():
-        raise FileNotFoundError(f"Expected model card at {model_card_path}")
-
-    cards_root = cards_dir.parent.parent
-    target_ckpt_dir = cards_root / "ckpts"
-    target_ckpt_dir.mkdir(parents=True, exist_ok=True)
-    target_ckpt = target_ckpt_dir / "y_256b_img.pth"
-    source_ckpt = Path(__file__).resolve().parent.parent / "ckpts" / "y_256b_img.pth"
-
-    if (
-        not target_ckpt.exists() or target_ckpt.stat().st_size < 100_000_000
-    ) and source_ckpt.exists():
-        shutil.copy2(source_ckpt, target_ckpt)
-        logging.info("Copied checkpoint file to target directory.")
-
-    # Load model (assuming your existing function)
-    with _TempWorkingDir(cards_dir.parent.parent):
-        model = setup_model_from_model_card(model_card_path)
-
+def get_videoseal() -> nn.Module:
+    current_path = Path(__file__).resolve().parent
+    model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
     return model
