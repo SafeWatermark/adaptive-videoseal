@@ -11,7 +11,7 @@ This repository includes the original VideoSeal implementation, research noteboo
 ## 1. Overview
 
 * **Baseline VideoSeal**: Official video/audio watermarking inference and evaluation code (`src/videoseal`).
-* **Adaptive pipeline**: `src/main.py` extends VideoSeal with **adaptive keyframe selection and watermark propagation logic**.
+* **Adaptive pipeline**: `src/adaptive_models/adaptive_videoseal.py` extends VideoSeal with **adaptive keyframe selection and watermark propagation logic**.
 * **Checkpoints**: Model weights are downloaded automatically and cached in the `ckpts/` directory.
 
 ## 2. Environment Setup

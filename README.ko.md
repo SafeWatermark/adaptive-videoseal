@@ -12,7 +12,7 @@
 ## 1. 개요 (Overview)
 
 * **Baseline VideoSeal**: 공식 비디오/오디오 워터마킹 추론 및 평가 코드.(`src/videoseal`)
-* **Adaptive pipeline**: `src/main.py`는 VideoSeal 기반으로 **adaptive 키프레임 선택 및 전파 로직**을 추가.
+* **Adaptive pipeline**: `src/adaptive_models/adaptive_videoseal.py`는 VideoSeal 기반으로 **adaptive 키프레임 선택 및 전파 로직**을 추가.
 * **체크포인트 (Checkpoints)**: 모델 가중치는 자동으로 다운로드되며, `ckpts/` 경로에 캐시됨.
 
 ## 2. 환경 설정 (Environment Setup)
