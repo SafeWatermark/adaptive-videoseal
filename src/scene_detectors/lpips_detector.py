@@ -34,10 +34,19 @@ class LpipsDetector(SceneDetector):
         Returns:
             torch.Tensor: Indices of key frames, shape (K,)
         """
-        if frames.min().item() < 0.0 or frames.max().item() > 1.0:
+        epsilon = 1e-6
+        min_val = frames.min().item()
+        max_val = frames.max().item()
+
+        if min_val < 0.0 - epsilon or max_val > 1.0 + epsilon:
             raise ValueError(
                 f"`frames` must be normalized to [0, 1], but found values in [{frames.min().item():.3f}, {frames.max().item():.3f}]."
             )
+
+        # If values exceed only by tiny floating drift → clamp
+        if min_val < 0.0 or max_val > 1.0:
+            frames = frames.clamp(0.0, 1.0)
+
         dists = self.lpips(frames[:-1], frames[1:], normalize=True)
 
         candidate_key_frame_ids = torch.where(dists > self.threshold)[0] + 1

@@ -1,5 +1,5 @@
 #!/bin/bash
-EXPERIMENT_SCRIPT="src/main.py"
+EXPERIMENT_SCRIPT="src/poc.py"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 python "$EXPERIMENT_SCRIPT" \

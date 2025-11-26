@@ -4,8 +4,8 @@ import tempfile
 import torch
 import ffmpeg
 
-from src.main import embed_video
-from src.main import get_video_info
+from src.poc import embed_video
+from src.poc import get_video_info
 
 
 class FakeModel:

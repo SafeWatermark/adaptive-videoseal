@@ -6,6 +6,9 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import sys
+from videoseal.utils.cfg import setup_model_from_model_card
+
+import torch.nn as nn
 
 
 def setup_seed(seed: int):
@@ -56,3 +59,9 @@ def select_device(device_choice: str):
     else:
         device = torch.device("cpu")
     return device
+
+
+def get_videoseal() -> nn.Module:
+    current_path = Path(__file__).resolve().parent
+    model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
+    return model
