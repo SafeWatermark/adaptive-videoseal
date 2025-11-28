@@ -3,9 +3,16 @@ from scene_detectors.base import SceneDetector
 import torch
 from torch.nn import functional as F
 from scene_detectors.registry import detector_registry
+import copy
 
 
 class AdaptiveVideoseal(Videoseal):
+    @classmethod
+    def from_videoseal(cls, model):
+        new = copy.copy(model)
+        new.__class__ = cls
+        return new
+
     def set_scene_detector(self, scene_detector: SceneDetector):
         self.scene_detector = scene_detector
 

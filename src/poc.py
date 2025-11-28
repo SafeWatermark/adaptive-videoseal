@@ -246,9 +246,7 @@ def run_experiment(args):
     model.video_mode = args.video_mode
 
     # Adaptive model setup
-    adaptive_model = AdaptiveVideoseal(model.embedder, model.detector, model.augmenter)
-    adaptive_model.load_state_dict(model.state_dict(), strict=False)
-    adaptive_model.__dict__.update(model.__dict__)
+    adaptive_model = AdaptiveVideoseal.from_videoseal(model)
 
     # --- Scene detector selection ---
     try:
@@ -258,13 +256,8 @@ def run_experiment(args):
 
     adaptive_model.set_scene_detector(scene_detector)
     adaptive_model.set_logger(logger)
-    adaptive_model.eval().to(device)
+    adaptive_model = adaptive_model.eval().to(device)
     adaptive_model.compile()
-
-    adaptive_model.step_size = args.step_size
-    adaptive_model.blender.scaling_w *= args.scaling_w
-    adaptive_model.attenuation = model.attenuation
-    adaptive_model.video_mode = args.video_mode
 
     # Experiment parameters
     n_trials = args.n_trials
@@ -402,6 +395,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--input_dir", type=str, default="./data", help="Input directory for videos"
     )
+
     parser.add_argument(
         "--output_dir",
         type=str,
