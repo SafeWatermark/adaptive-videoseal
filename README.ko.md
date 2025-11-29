@@ -93,6 +93,19 @@ bash scripts/run_lpips_detector.sh # lpips detector를 활용한 experiment 실�
 * `outputs/adaptive_1.mp4` → 적응형 모델 워터마킹 결과
 * `outputs/*.txt` → 재현 가능한 페이로드 비트 저장
 
+### 3.3 SA-V validation 이미지 → 비디오 변환
+
+SA-V validation 데이터셋은 각 샘플이 **JPEG 이미지 시퀀스(프레임 폴더)** 형태로 제공됩니다.
+Adaptive VideoSeal로 평가하려면 먼저 이 이미지 프레임들을 MP4 비디오로 변환해야 합니다.
+
+이를 위한 간단한 유틸리티 스크립트를 제공합니다:
+
+```bash
+uv run scripts/sav_val_image2video.py --data_path <JPEGImages directory>
+```
+
+각 폴더의 프레임을 하나의 `.mp4` 비디오로 자동 변환합니다.
+
 ## 4. test
 프로젝트의 주요 구성 요소는 모두 pytest 기반 단위 테스트로 검증됩니다.
 테스트 코드는 tests/ 디렉터리에 포함되어 있습니다.
