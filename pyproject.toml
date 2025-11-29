@@ -31,6 +31,7 @@ dependencies = [
     "torch-dct>=0.1.6",
     "tqdm>=4.67.1",
     "transformers>=4.57.1",
+    "albumentations>=2.0.8",
 ]
 
 

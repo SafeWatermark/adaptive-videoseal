@@ -18,8 +18,10 @@ from tqdm import tqdm
 import tempfile
 import cv2
 import ffmpeg
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
+
+# Import albumentations for faster image processing (required)
+import albumentations as A
 
 # Add submodule to path
 submodule_path = Path(__file__).parent.parent / "videomarkbench"
@@ -43,6 +45,68 @@ from common_perturabtions.frame_switch import FrameSwitch  # noqa: E402
 from common_perturabtions.gaussian import Gaussian  # noqa: E402
 from common_perturabtions.gaussian_blur import GaussianBlur  # noqa: E402
 from common_perturabtions.jpeg import JPEG  # noqa: E402
+
+
+def _video_to_numpy_uint8(video: torch.Tensor) -> np.ndarray:
+    """
+    Convert video tensor to numpy array in albumentations format.
+    
+    Args:
+        video: Video tensor of shape (T, C, H, W) in [0, 1]
+        
+    Returns:
+        Video numpy array of shape (T, H, W, C) in uint8 [0, 255]
+    """
+    return (video.cpu().permute(0, 2, 3, 1).numpy() * 255).astype(np.uint8)
+
+
+def _numpy_uint8_to_video(video_np: np.ndarray, original_device: torch.device) -> torch.Tensor:
+    """
+    Convert numpy array back to video tensor.
+    
+    Args:
+        video_np: Video numpy array of shape (T, H, W, C) in uint8 [0, 255]
+        original_device: Device to move tensor to
+        
+    Returns:
+        Video tensor of shape (T, C, H, W) in [0, 1]
+    """
+    return torch.from_numpy(video_np).permute(0, 3, 1, 2).float() / 255.0
+
+
+def _apply_albumentations_transform(
+    video: torch.Tensor,
+    transform: A.BasicTransform,
+    clamp: bool = False
+) -> torch.Tensor:
+    """
+    Apply albumentations transform to video using video augmentation API.
+    
+    Uses `images` (plural) argument to process all frames at once with consistent parameters.
+    Reference: https://albumentations.ai/docs/3-basic-usage/video-augmentation/
+    
+    Args:
+        video: Video tensor of shape (T, C, H, W) in [0, 1]
+        transform: albumentations transform to apply
+        clamp: Whether to clamp output to [0, 1] range
+        
+    Returns:
+        Perturbed video tensor of shape (T, C, H, W) in [0, 1]
+    """
+    # Convert to numpy format
+    video_np = _video_to_numpy_uint8(video)
+    
+    # Apply transform using video augmentation API
+    augmented = transform(images=video_np)
+    perturbed_np = augmented['images']
+    
+    # Convert back to tensor
+    perturbed_tensor = _numpy_uint8_to_video(perturbed_np, video.device)
+    
+    if clamp:
+        perturbed_tensor = perturbed_tensor.clamp(0., 1.)
+    
+    return perturbed_tensor.to(video.device)
 
 
 class MPEG4Wrapper(nn.Module):
@@ -697,80 +761,74 @@ def evaluate_common_perturbations(
                 logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
 
 
-def _process_jpeg_frame(args: Tuple[torch.Tensor, int, int]) -> torch.Tensor:
+def _apply_jpeg_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
     """
-    Process a single frame with JPEG compression (for parallel processing).
-    
-    Args:
-        args: Tuple of (frame_tensor, quality, frame_idx)
-        
-    Returns:
-        Compressed frame tensor
-    """
-    frame, quality, frame_idx = args
-    import torchvision.transforms as T
-    from PIL import Image
-    import io
-    
-    to_pil = T.ToPILImage()
-    to_tensor = T.ToTensor()
-    
-    # Convert to PIL and compress
-    frame_np = frame.squeeze(0).cpu()  # (C, H, W)
-    image = to_pil(frame_np)
-    
-    output = io.BytesIO()
-    image.save(output, 'JPEG', quality=quality)
-    output.seek(0)
-    compressed_image = Image.open(output)
-    
-    x_compressed = to_tensor(compressed_image).unsqueeze(0)  # (1, C, H, W)
-    return x_compressed.squeeze(0)  # (C, H, W)
-
-
-def _apply_jpeg_parallel(pert: torch.nn.Module, video: torch.Tensor, T: int) -> torch.Tensor:
-    """
-    Apply JPEG perturbation to video using parallel processing.
+    Apply JPEG perturbation using albumentations video augmentation.
     
     Args:
         pert: JPEG perturbation module
         video: Video tensor of shape (T, C, H, W)
-        T: Number of frames
+        T, C, H, W: Video dimensions
         
     Returns:
         Perturbed video tensor
     """
     quality = pert.quality
+    transform = A.ImageCompression(
+        compression_type='jpeg',
+        quality_range=(quality, quality),
+        p=1.0
+    )
+    return _apply_albumentations_transform(video, transform)
+
+
+def _apply_gaussianblur_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
+    """
+    Apply Gaussian blur using albumentations video augmentation.
     
-    # Use ThreadPoolExecutor for I/O-bound JPEG processing
-    # Process frames in parallel (PIL operations are thread-safe)
-    # Limit workers to reduce memory usage (use smaller batches)
-    max_workers = min(4, T)  # Limit to 4 workers max to save memory
+    Args:
+        pert: GaussianBlur perturbation module
+        video: Video tensor of shape (T, C, H, W)
+        T, C, H, W: Video dimensions
+        
+    Returns:
+        Perturbed video tensor
+    """
+    # Get std from perturbation (GaussianBlur.sigma is a tuple)
+    std = pert.sigma[0] if isinstance(pert.sigma, tuple) else pert.sigma
     
-    # Process in smaller batches to reduce memory peak usage
-    batch_size = max(1, T // max_workers) if max_workers > 0 else T
-    perturbed_frames = []
+    # albumentations GaussianBlur uses blur_limit and sigma_limit
+    # Fixed kernel size of 5
+    transform = A.GaussianBlur(
+        blur_limit=(5, 5),
+        sigma_limit=(std, std),
+        p=1.0
+    )
+    return _apply_albumentations_transform(video, transform)
+
+
+def _apply_crop_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
+    """
+    Apply Crop using albumentations video augmentation.
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for batch_start in range(0, T, batch_size):
-            batch_end = min(batch_start + batch_size, T)
-            # Prepare arguments for this batch
-            frame_args = [
-                (video[frame_idx:frame_idx+1], quality, frame_idx)
-                for frame_idx in range(batch_start, batch_end)
-            ]
-            
-            # Process batch in parallel
-            batch_results = list(executor.map(_process_jpeg_frame, frame_args))
-            perturbed_frames.extend(batch_results)
-            
-            # Clear intermediate results to save memory
-            del batch_results, frame_args
+    Args:
+        pert: Crop perturbation module
+        video: Video tensor of shape (T, C, H, W)
+        T, C, H, W: Video dimensions
+        
+    Returns:
+        Perturbed video tensor
+    """
+    crop_ratio = pert.crop_ratio
+    crop_height = int(H * crop_ratio)
+    crop_width = int(W * crop_ratio)
     
-    # Stack frames: (T, C, H, W)
-    result = torch.stack(perturbed_frames, dim=0).to(video.device)
-    del perturbed_frames
-    return result
+    # Create transform pipeline: RandomCrop + Resize
+    transform = A.Compose([
+        A.RandomCrop(height=crop_height, width=crop_width, p=1.0),
+        A.Resize(height=H, width=W, p=1.0)
+    ])
+    return _apply_albumentations_transform(video, transform, clamp=True)
 
 
 def _apply_frame_average_optimized(pert: torch.nn.Module, video: torch.Tensor, T: int) -> torch.Tensor:
@@ -834,49 +892,12 @@ def _apply_frame_average_optimized(pert: torch.nn.Module, video: torch.Tensor, T
     return result.to(video.device)
 
 
-def _apply_crop_optimized(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
-    """
-    Optimized version of Crop using batch processing.
-    
-    Args:
-        pert: Crop perturbation module
-        video: Video tensor of shape (T, C, H, W)
-        T, C, H, W: Video dimensions
-        
-    Returns:
-        Cropped and resized video tensor
-    """
-    import torchvision.transforms.functional as F
-    
-    crop_ratio = pert.crop_ratio
-    crop_height = int(H * crop_ratio)
-    crop_width = int(W * crop_ratio)
-    
-    # Get crop parameters from first frame (same for all frames)
-    from torchvision.transforms import RandomCrop
-    i, j, h, w = RandomCrop.get_params(video[0], output_size=(crop_height, crop_width))
-    
-    # Batch crop all frames at once using tensor slicing
-    # Crop: video[:, :, i:i+h, j:j+w]
-    cropped = video[:, :, i:i+h, j:j+w]  # (T, C, h, w)
-    
-    # Batch resize all frames at once using interpolate
-    # Use bilinear interpolation for resize
-    cropped_resized = torch.nn.functional.interpolate(
-        cropped, 
-        size=(H, W), 
-        mode='bilinear', 
-        align_corners=False
-    )  # (T, C, H, W)
-    
-    return cropped_resized.clamp(0., 1.)
-
-
 def _apply_perturbation(pert: torch.nn.Module, video: torch.Tensor, pert_name: str) -> torch.Tensor:
     """
     Apply perturbation to video, handling different perturbation types.
     
-    Optimized to use batch processing where possible.
+    Uses albumentations for JPEG, GaussianBlur, and Crop (required).
+    Other perturbations use optimized implementations.
     
     Args:
         pert: Perturbation module
@@ -889,33 +910,36 @@ def _apply_perturbation(pert: torch.nn.Module, video: torch.Tensor, pert_name: s
     # Reshape video to (T, C, H, W) -> (T, C, H, W) for batch processing
     T, C, H, W = video.shape
     
-    # GaussianBlur already supports batch processing (B, C, H, W)
-    if pert_name == "GaussianBlur":
-        # Reshape to (T, C, H, W) and apply - GaussianBlur expects (B, C, H, W)
-        video_batch = video  # Already in correct shape
-        return pert(video_batch)
+    # Albumentations-based perturbations (required)
+    if pert_name == "JPEG":
+        return _apply_jpeg_albumentations(pert, video, T, C, H, W)
     
-    # Gaussian also supports batch processing (element-wise operations)
+    elif pert_name == "GaussianBlur":
+        return _apply_gaussianblur_albumentations(pert, video, T, C, H, W)
+    
+    elif pert_name == "Crop":
+        return _apply_crop_albumentations(pert, video, T, C, H, W)
+    
+    # Gaussian: Use original implementation (albumentations has precision loss and different clamp behavior)
     elif pert_name == "Gaussian":
-        # Reshape to (T, C, H, W) and apply - Gaussian works element-wise
-        video_batch = video  # Already in correct shape
-        return pert(video_batch)
-    
-    # JPEG requires frame-by-frame processing due to PIL Image conversion
-    # Use parallel processing to speed up
-    elif pert_name == "JPEG":
-        return _apply_jpeg_parallel(pert, video, T)
+        # Apply perturbation directly on tensor (matches original behavior exactly)
+        std = pert.noise_level
+        min_value = torch.min(video)
+        max_value = torch.max(video)
+        
+        # Generate noise and apply
+        gaussian = torch.randn_like(video)
+        noised_video = video + std * gaussian
+        noised_video = noised_video.clamp(min_value.item(), max_value.item())
+        
+        return noised_video
     
     # FrameAverage: Optimize with vectorized operations
     elif pert_name == "FrameAverage":
         return _apply_frame_average_optimized(pert, video, T)
     
-    # Crop: Optimize with batch processing
-    elif pert_name == "Crop":
-        return _apply_crop_optimized(pert, video, T, C, H, W)
-    
     else:
-        # Apply perturbation to entire video (FrameRemove, FrameSwitch, etc.)
+        # Apply perturbation to entire video (FrameRemove, FrameSwitch, MPEG4, etc.)
         return pert(video)
 
 
