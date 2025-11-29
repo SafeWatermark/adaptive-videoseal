@@ -1,3 +1,6 @@
 [submodule "src/videoseal"]
 	path = src/videoseal
 	url = https://github.com/facebookresearch/videoseal.git
+[submodule "src/videomarkbench"]
+	path = src/videomarkbench
+	url = https://github.com/zhengyuan-jiang/VideoMarkBench.git
