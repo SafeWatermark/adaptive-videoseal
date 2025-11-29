@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from typing import List, Dict, Optional, Iterator, Tuple
 import pandas as pd
@@ -17,6 +18,8 @@ from tqdm import tqdm
 import tempfile
 import cv2
 import ffmpeg
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from functools import partial
 
 # Add submodule to path
 submodule_path = Path(__file__).parent.parent / "videomarkbench"
@@ -71,7 +74,7 @@ class MPEG4Wrapper(nn.Module):
     
     def forward(self, video: torch.Tensor) -> torch.Tensor:
         """
-        Apply MPEG4 compression to video.
+        Apply MPEG4 compression to video (optimized version).
         
         Args:
             video: Video tensor of shape (T, C, H, W) in [0, 1]
@@ -84,7 +87,7 @@ class MPEG4Wrapper(nn.Module):
         temp_file = self.temp_dir / f"mpeg4_{uuid.uuid4().hex}.mp4"
         
         try:
-            # Convert video to numpy array
+            # Convert video to numpy array (batch conversion is faster)
             frames = (video * 255).byte().cpu().numpy()
             frames = np.transpose(frames, (0, 2, 3, 1))  # (T, H, W, C)
             
@@ -92,47 +95,68 @@ class MPEG4Wrapper(nn.Module):
             T, H, W, C = frames.shape
             fps = 25  # Default FPS
             
-            # Write video using ffmpeg
+            # Optimized ffmpeg pipeline with faster encoding settings
             process = (
                 ffmpeg
                 .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{W}x{H}', r=fps)
-                .output(str(temp_file), vcodec=self.codec, pix_fmt='yuv420p', crf=self.quality)
+                .output(
+                    str(temp_file),
+                    vcodec=self.codec,
+                    pix_fmt='yuv420p',
+                    crf=self.quality,
+                    preset='ultrafast',  # Faster encoding
+                    movflags='faststart',  # Optimize for streaming
+                    **{'threads': '0'}  # Use all available threads
+                )
                 .overwrite_output()
-                .run_async(pipe_stdin=True, pipe_stderr=True)
+                .run_async(pipe_stdin=True, pipe_stderr=True, quiet=True)
             )
             
-            # Write frames to ffmpeg
-            for frame in frames:
-                process.stdin.write(frame.tobytes())
-            
+            # Write all frames at once (faster than frame-by-frame)
+            frames_bytes = frames.tobytes()
+            process.stdin.write(frames_bytes)
             process.stdin.close()
             process.wait()
             
-            # Read compressed video back
-            cap = cv2.VideoCapture(str(temp_file))
-            compressed_frames = []
-            
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            # Read compressed video back using decord if available (faster than cv2)
+            try:
+                from decord import VideoReader, cpu
+                vr = VideoReader(str(temp_file), width=W, height=H, num_threads=4, ctx=cpu(0))
+                num_frames = len(vr)
+                if num_frames > 0:
+                    # Get all frames at once
+                    vid_np = vr.get_batch(range(num_frames)).asnumpy()  # (T, H, W, C) in RGB
+                    # Convert to tensor: (T, H, W, C) -> (T, C, H, W)
+                    compressed_video = torch.from_numpy(vid_np).float()
+                    compressed_video = compressed_video.permute(0, 3, 1, 2) / 255.0  # (T, C, H, W)
+                else:
+                    raise ValueError("No frames read from compressed video")
+            except (ImportError, Exception):
+                # Fallback to cv2 if decord is not available
+                cap = cv2.VideoCapture(str(temp_file))
+                compressed_frames = []
                 
-                # Convert BGR to RGB and resize if needed
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                if frame.shape[:2] != (H, W):
-                    frame = cv2.resize(frame, (W, H))
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
+                    # Convert BGR to RGB and resize if needed
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if frame.shape[:2] != (H, W):
+                        frame = cv2.resize(frame, (W, H))
+                    
+                    # Convert to tensor: (H, W, C) -> (C, H, W)
+                    frame = torch.from_numpy(frame.transpose(2, 0, 1)).float() / 255.0
+                    compressed_frames.append(frame)
                 
-                # Convert to tensor: (H, W, C) -> (C, H, W)
-                frame = torch.from_numpy(frame.transpose(2, 0, 1)).float() / 255.0
-                compressed_frames.append(frame)
-            
-            cap.release()
-            
-            if len(compressed_frames) == 0:
-                raise ValueError("No frames read from compressed video")
-            
-            # Stack frames: (T, C, H, W)
-            compressed_video = torch.stack(compressed_frames, dim=0)
+                cap.release()
+                
+                if len(compressed_frames) == 0:
+                    raise ValueError("No frames read from compressed video")
+                
+                # Stack frames: (T, C, H, W)
+                compressed_video = torch.stack(compressed_frames, dim=0)
             
             # Ensure same number of frames (handle frame count mismatch)
             if compressed_video.shape[0] != video.shape[0]:
@@ -204,9 +228,104 @@ def _wrap_aggregation_func(original_func, watermark_gt: np.ndarray):
     return wrapped_func
 
 
+def _call_with_watermark_gt_tensor(func, decode: torch.Tensor, watermark_gt: torch.Tensor) -> bool:
+    """
+    GPU-optimized version of aggregation function using PyTorch tensors.
+    
+    Args:
+        func: Aggregation function (for name lookup)
+        decode: Logits tensor of shape (T, K) on GPU
+        watermark_gt: Ground truth watermark tensor of shape (K,) on GPU
+        
+    Returns:
+        Boolean indicating if watermark is detected
+    """
+    from scipy.optimize import minimize
+    from scipy.stats import binom
+    
+    func_name = func.__name__
+    
+    # Ensure both tensors are on the same device
+    device = decode.device
+    watermark_gt = watermark_gt.to(device)
+    
+    # Convert logits to bits: positive -> 1, negative/zero -> 0
+    # VideoSeal convention: logits > 0 -> bit 1, logits <= 0 -> bit 0
+    predicted_bits = (decode > 0).long()  # 1 for positive, 0 for negative/zero
+    
+    if func_name == 'logit_mean':
+        decoded = torch.mean(decode, dim=0)
+        predicted = (decoded > 0).long()
+        bitacc = torch.sum((watermark_gt == predicted).float()) / len(watermark_gt)
+        return (bitacc >= 67/96).item()
+    
+    elif func_name == 'logit_g_median':
+        # This requires scipy optimization, so convert to CPU for this step
+        decode_np = decode.detach().cpu().numpy()
+        watermark_gt_np = watermark_gt.detach().cpu().numpy()
+        
+        def objective(median):
+            return np.sum(np.linalg.norm(decode_np - median, axis=1))
+        initial_guess = np.mean(decode_np, axis=0)
+        decoded = minimize(objective, initial_guess, method='Powell', tol=1e-5)
+        predicted = (decoded.x > 0).astype(int)
+        bitacc = np.sum((watermark_gt_np == predicted)) / len(watermark_gt_np)
+        return bitacc >= 67/96
+    
+    elif func_name == 'bit_majority':
+        # Majority vote across frames
+        decoded = (torch.sum(predicted_bits, dim=0) > (decode.shape[0] / 2)).long()
+        bitacc = torch.sum((watermark_gt == decoded).float()) / len(watermark_gt)
+        return (bitacc >= 67/96).item()
+    
+    elif func_name == 'bit_g_median':
+        decoded = torch.median(predicted_bits.float(), dim=0)[0].long()
+        bitacc = torch.sum((watermark_gt == decoded).float()) / len(watermark_gt)
+        return (bitacc >= 67/96).item()
+    
+    elif func_name == 'bitacc_mean':
+        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
+        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float())
+        return (bitacc >= 67/96).item()
+    
+    elif func_name == 'bitacc_median':
+        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
+        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
+        median_bitacc = torch.median(bitacc)
+        return (median_bitacc >= 67/96).item()
+    
+    elif func_name == 'detection_threshold':
+        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
+        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
+        detected_frames = torch.sum((bitacc >= 67/96).long()).item()
+        
+        n = decode.shape[0]
+        p = 0.0000661
+        threshold = 10e-4
+        k = n  # Default if no threshold found
+        for i in range(n + 1):
+            if binom.sf(i - 1, n, p) <= threshold:
+                k = i
+                break
+        
+        return detected_frames >= k
+    
+    elif func_name == 'detection_majority':
+        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
+        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
+        detected_frames = torch.sum((bitacc >= 67/96).long()).item()
+        return detected_frames > (decode.shape[0] // 2)
+    
+    else:
+        # Fallback: convert to numpy and use original function
+        decode_np = decode.detach().cpu().numpy()
+        watermark_gt_np = watermark_gt.detach().cpu().numpy()
+        return _call_with_watermark_gt(func, decode_np, watermark_gt_np)
+
+
 def _call_with_watermark_gt(func, decode: np.ndarray, watermark_gt: np.ndarray) -> bool:
     """
-    Call aggregation function with custom watermark_gt.
+    Call aggregation function with custom watermark_gt (CPU/numpy version for fallback).
     
     Reimplements the aggregation logic from aggregation.py but uses actual watermark_gt.
     
@@ -396,11 +515,27 @@ def evaluate_common_perturbations(
             if max_frames_per_video and video.shape[0] > max_frames_per_video:
                 video = video[:max_frames_per_video]
 
-            # Embed watermark for removal attack
+            # Embed watermark for removal attack (cache results for reuse)
             with torch.no_grad():
                 embed_result = model.embed(video)
                 watermarked_video = embed_result["watermarked_video"]
                 embedded_message = embed_result["message"]
+                # Pre-convert to long for reuse (avoid repeated conversions)
+                embedded_message_long = embedded_message.long()
+            
+            # Note: No caching of perturbation results to save memory
+            # Each perturbation is only used once, so caching doesn't help
+
+            # Ensure video and watermarked_video are on the same device
+            # (Already on device from model.embed, so this is just for consistency)
+            device = video.device
+            # Only move if necessary (avoid unnecessary transfers)
+            if watermarked_video.device != device:
+                watermarked_video = watermarked_video.to(device)
+            if embedded_message.device != device:
+                embedded_message = embedded_message.to(device)
+            if embedded_message_long.device != device:
+                embedded_message_long = embedded_message_long.to(device)
 
             # Evaluate each perturbation
             pert_tqdm = tqdm(perturbations, desc=f"{video_name}: perturbations", leave=False)
@@ -430,21 +565,32 @@ def evaluate_common_perturbations(
                         logger.warning(f"Error extracting from {display_name} (removal): {e}")
                         continue
 
-                # Evaluate with all aggregation strategies
-                logits_np = logits.detach().cpu().numpy()  # Shape: (T, K)
-                embedded_message_np = embedded_message.detach().cpu().numpy()  # Shape: (K,)
+                # Evaluate with all aggregation strategies (GPU-optimized)
+                # Keep tensors on GPU to avoid unnecessary CPU transfers
                 
-                # Match dimensions
-                if logits_np.shape[1] > len(embedded_message_np):
-                    logits_np = logits_np[:, :len(embedded_message_np)]
-                elif logits_np.shape[1] < len(embedded_message_np):
-                    embedded_message_np = embedded_message_np[:logits_np.shape[1]]
+                # Ensure embedded_message_long is on the same device as logits
+                # Only transfer if necessary (optimize device transfers)
+                logits_device = logits.device
+                if embedded_message_long.device != logits_device:
+                    embedded_message_long_device = embedded_message_long.to(logits_device)
+                else:
+                    embedded_message_long_device = embedded_message_long
                 
-                watermark_gt = embedded_message_np.astype(np.int32)  # Shape: (K,)
+                # Match dimensions on GPU (reuse pre-converted embedded_message_long)
+                if logits.shape[1] > embedded_message_long_device.shape[0]:
+                    logits_matched = logits[:, :embedded_message_long_device.shape[0]]
+                    watermark_gt = embedded_message_long_device  # Shape: (K,) - reuse cached conversion
+                elif logits.shape[1] < embedded_message_long_device.shape[0]:
+                    logits_matched = logits
+                    watermark_gt = embedded_message_long_device[:logits.shape[1]]  # Shape: (K,) - reuse cached conversion
+                else:
+                    logits_matched = logits
+                    watermark_gt = embedded_message_long_device  # Shape: (K,) - reuse cached conversion
                 
                 for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
                     try:
-                        detected = _call_with_watermark_gt(agg_func, logits_np, watermark_gt)
+                        # Use GPU tensor version for better performance
+                        detected = _call_with_watermark_gt_tensor(agg_func, logits_matched, watermark_gt)
                         results.append({
                             "video": video_name,
                             "perturbation": display_name,
@@ -476,24 +622,32 @@ def evaluate_common_perturbations(
                             continue
 
                     # For forgery, check if watermark is detected in unwatermarked video (false positive)
-                    # Use the same embedded message pattern as reference
-                    logits_forgery_np = logits_forgery.detach().cpu().numpy()  # Shape: (T, K)
-                    
-                    # Match dimensions
-                    if logits_forgery_np.shape[1] > len(embedded_message_np):
-                        logits_forgery_np = logits_forgery_np[:, :len(embedded_message_np)]
-                    elif logits_forgery_np.shape[1] < len(embedded_message_np):
-                        embedded_message_np_forgery = embedded_message_np[:logits_forgery_np.shape[1]]
+                    # Use the same embedded message pattern as reference (GPU-optimized)
+                    # Ensure embedded_message_long is on the same device as logits_forgery
+                    # Only transfer if necessary (optimize device transfers)
+                    logits_forgery_device = logits_forgery.device
+                    if embedded_message_long.device != logits_forgery_device:
+                        embedded_message_long_forgery = embedded_message_long.to(logits_forgery_device)
                     else:
-                        embedded_message_np_forgery = embedded_message_np
+                        embedded_message_long_forgery = embedded_message_long
+                    
+                    # Match dimensions on GPU (reuse pre-converted embedded_message_long)
+                    if logits_forgery.shape[1] > embedded_message_long_forgery.shape[0]:
+                        logits_forgery_matched = logits_forgery[:, :embedded_message_long_forgery.shape[0]]
+                        watermark_gt_forgery = embedded_message_long_forgery  # Reuse cached conversion
+                    elif logits_forgery.shape[1] < embedded_message_long_forgery.shape[0]:
+                        logits_forgery_matched = logits_forgery
+                        watermark_gt_forgery = embedded_message_long_forgery[:logits_forgery.shape[1]]  # Reuse cached conversion
+                    else:
+                        logits_forgery_matched = logits_forgery
+                        watermark_gt_forgery = embedded_message_long_forgery  # Reuse cached conversion
                     
                     # For forgery, use the same watermark pattern as reference
                     # If this pattern is detected in unwatermarked video, it's a false positive (forgery success)
-                    watermark_gt_forgery = embedded_message_np_forgery.astype(np.int32)
-                    
                     for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
                         try:
-                            detected_forgery = _call_with_watermark_gt(agg_func, logits_forgery_np, watermark_gt_forgery)
+                            # Use GPU tensor version for better performance
+                            detected_forgery = _call_with_watermark_gt_tensor(agg_func, logits_forgery_matched, watermark_gt_forgery)
                             results.append({
                                 "video": video_name,
                                 "perturbation": display_name,
@@ -505,6 +659,18 @@ def evaluate_common_perturbations(
                             })
                         except Exception as e:
                             logger.warning(f"Error in {agg_name} for {display_name} (forgery): {e}")
+                
+                # Explicitly delete large tensors to free memory
+                del perturbed_video
+                if evaluate_forgery:
+                    del perturbed_original
+                del logits
+                if evaluate_forgery:
+                    del logits_forgery
+                
+                # Clear GPU cache periodically (every 3 perturbations) to prevent memory buildup
+                if torch.cuda.is_available() and (pert_tqdm.n % 3 == 0):
+                    torch.cuda.empty_cache()
 
         df = pd.DataFrame(results)
         output_file = output_dir / "common_perturbations_results.csv"
@@ -531,9 +697,186 @@ def evaluate_common_perturbations(
                 logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
 
 
+def _process_jpeg_frame(args: Tuple[torch.Tensor, int, int]) -> torch.Tensor:
+    """
+    Process a single frame with JPEG compression (for parallel processing).
+    
+    Args:
+        args: Tuple of (frame_tensor, quality, frame_idx)
+        
+    Returns:
+        Compressed frame tensor
+    """
+    frame, quality, frame_idx = args
+    import torchvision.transforms as T
+    from PIL import Image
+    import io
+    
+    to_pil = T.ToPILImage()
+    to_tensor = T.ToTensor()
+    
+    # Convert to PIL and compress
+    frame_np = frame.squeeze(0).cpu()  # (C, H, W)
+    image = to_pil(frame_np)
+    
+    output = io.BytesIO()
+    image.save(output, 'JPEG', quality=quality)
+    output.seek(0)
+    compressed_image = Image.open(output)
+    
+    x_compressed = to_tensor(compressed_image).unsqueeze(0)  # (1, C, H, W)
+    return x_compressed.squeeze(0)  # (C, H, W)
+
+
+def _apply_jpeg_parallel(pert: torch.nn.Module, video: torch.Tensor, T: int) -> torch.Tensor:
+    """
+    Apply JPEG perturbation to video using parallel processing.
+    
+    Args:
+        pert: JPEG perturbation module
+        video: Video tensor of shape (T, C, H, W)
+        T: Number of frames
+        
+    Returns:
+        Perturbed video tensor
+    """
+    quality = pert.quality
+    
+    # Use ThreadPoolExecutor for I/O-bound JPEG processing
+    # Process frames in parallel (PIL operations are thread-safe)
+    # Limit workers to reduce memory usage (use smaller batches)
+    max_workers = min(4, T)  # Limit to 4 workers max to save memory
+    
+    # Process in smaller batches to reduce memory peak usage
+    batch_size = max(1, T // max_workers) if max_workers > 0 else T
+    perturbed_frames = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for batch_start in range(0, T, batch_size):
+            batch_end = min(batch_start + batch_size, T)
+            # Prepare arguments for this batch
+            frame_args = [
+                (video[frame_idx:frame_idx+1], quality, frame_idx)
+                for frame_idx in range(batch_start, batch_end)
+            ]
+            
+            # Process batch in parallel
+            batch_results = list(executor.map(_process_jpeg_frame, frame_args))
+            perturbed_frames.extend(batch_results)
+            
+            # Clear intermediate results to save memory
+            del batch_results, frame_args
+    
+    # Stack frames: (T, C, H, W)
+    result = torch.stack(perturbed_frames, dim=0).to(video.device)
+    del perturbed_frames
+    return result
+
+
+def _apply_frame_average_optimized(pert: torch.nn.Module, video: torch.Tensor, T: int) -> torch.Tensor:
+    """
+    Optimized version of FrameAverage using fully vectorized operations.
+    
+    Uses unfold for efficient sliding window average computation.
+    
+    Args:
+        pert: FrameAverage perturbation module
+        video: Video tensor of shape (T, C, H, W)
+        T: Number of frames
+        
+    Returns:
+        Averaged video tensor
+    """
+    m = pert.m
+    
+    # If m == 1, return original video
+    if m == 1:
+        return video.clone()
+    
+    N, C, H, W = video.shape
+    
+    # Pad video for boundary handling (replicate edge frames)
+    pad_size = (m - 1) // 2
+    if pad_size > 0:
+        # Pad along first dimension (time)
+        # For 4D tensor (T, C, H, W), F.pad expects: (W_left, W_right, H_top, H_bottom, C_front, C_back, T_left, T_right)
+        # We only want to pad T dimension, so pad the last 2 values: (0, 0, 0, 0, 0, 0, pad_size, pad_size)
+        # But actually, we need to manually pad using torch.cat for time dimension
+        first_frame = video[0:1].repeat(pad_size, 1, 1, 1)  # Repeat first frame
+        last_frame = video[-1:].repeat(pad_size, 1, 1, 1)   # Repeat last frame
+        padded_video = torch.cat([first_frame, video, last_frame], dim=0)
+    else:
+        padded_video = video
+    
+    T_padded = padded_video.shape[0]
+    
+    # Reshape to (C*H*W, T_padded) for unfold
+    video_reshaped = padded_video.permute(1, 2, 3, 0).reshape(C * H * W, T_padded)  # (C*H*W, T_padded)
+    
+    # Unfold along time dimension to create sliding windows
+    # unfold(dimension, size, step): creates windows of size m with step 1
+    unfolded = video_reshaped.unfold(1, m, 1)  # (C*H*W, T_padded-m+1, m)
+    
+    # Take mean along window dimension
+    averaged = unfolded.mean(dim=-1)  # (C*H*W, T_padded-m+1)
+    
+    # Reshape back to (T_padded-m+1, C, H, W)
+    averaged = averaged.T.reshape(T_padded - m + 1, C, H, W)  # (T_padded-m+1, C, H, W)
+    
+    # Crop to original length N (handle boundary cases)
+    if averaged.shape[0] >= N:
+        result = averaged[:N]
+    else:
+        # If shorter, pad with last frame
+        last_frame = averaged[-1:].repeat(N - averaged.shape[0], 1, 1, 1)
+        result = torch.cat([averaged, last_frame], dim=0)
+    
+    return result.to(video.device)
+
+
+def _apply_crop_optimized(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
+    """
+    Optimized version of Crop using batch processing.
+    
+    Args:
+        pert: Crop perturbation module
+        video: Video tensor of shape (T, C, H, W)
+        T, C, H, W: Video dimensions
+        
+    Returns:
+        Cropped and resized video tensor
+    """
+    import torchvision.transforms.functional as F
+    
+    crop_ratio = pert.crop_ratio
+    crop_height = int(H * crop_ratio)
+    crop_width = int(W * crop_ratio)
+    
+    # Get crop parameters from first frame (same for all frames)
+    from torchvision.transforms import RandomCrop
+    i, j, h, w = RandomCrop.get_params(video[0], output_size=(crop_height, crop_width))
+    
+    # Batch crop all frames at once using tensor slicing
+    # Crop: video[:, :, i:i+h, j:j+w]
+    cropped = video[:, :, i:i+h, j:j+w]  # (T, C, h, w)
+    
+    # Batch resize all frames at once using interpolate
+    # Use bilinear interpolation for resize
+    cropped_resized = torch.nn.functional.interpolate(
+        cropped, 
+        size=(H, W), 
+        mode='bilinear', 
+        align_corners=False
+    )  # (T, C, H, W)
+    
+    return cropped_resized.clamp(0., 1.)
+
+
 def _apply_perturbation(pert: torch.nn.Module, video: torch.Tensor, pert_name: str) -> torch.Tensor:
     """
     Apply perturbation to video, handling different perturbation types.
+    
+    Optimized to use batch processing where possible.
     
     Args:
         pert: Perturbation module
@@ -543,18 +886,36 @@ def _apply_perturbation(pert: torch.nn.Module, video: torch.Tensor, pert_name: s
     Returns:
         Perturbed video tensor
     """
-    # Some perturbations expect (T, C, H, W), others expect frame-by-frame
-    # Handle frame-by-frame perturbations (JPEG, Gaussian, GaussianBlur)
-    if pert_name in ["JPEG", "Gaussian", "GaussianBlur"]:
-        # Apply perturbation to each frame
-        perturbed_frames = []
-        for frame_idx in range(video.shape[0]):
-            frame = video[frame_idx:frame_idx+1]  # (1, C, H, W)
-            perturbed_frame = pert(frame)  # (1, C, H, W)
-            perturbed_frames.append(perturbed_frame.squeeze(0))  # (C, H, W)
-        return torch.stack(perturbed_frames, dim=0)  # (T, C, H, W)
+    # Reshape video to (T, C, H, W) -> (T, C, H, W) for batch processing
+    T, C, H, W = video.shape
+    
+    # GaussianBlur already supports batch processing (B, C, H, W)
+    if pert_name == "GaussianBlur":
+        # Reshape to (T, C, H, W) and apply - GaussianBlur expects (B, C, H, W)
+        video_batch = video  # Already in correct shape
+        return pert(video_batch)
+    
+    # Gaussian also supports batch processing (element-wise operations)
+    elif pert_name == "Gaussian":
+        # Reshape to (T, C, H, W) and apply - Gaussian works element-wise
+        video_batch = video  # Already in correct shape
+        return pert(video_batch)
+    
+    # JPEG requires frame-by-frame processing due to PIL Image conversion
+    # Use parallel processing to speed up
+    elif pert_name == "JPEG":
+        return _apply_jpeg_parallel(pert, video, T)
+    
+    # FrameAverage: Optimize with vectorized operations
+    elif pert_name == "FrameAverage":
+        return _apply_frame_average_optimized(pert, video, T)
+    
+    # Crop: Optimize with batch processing
+    elif pert_name == "Crop":
+        return _apply_crop_optimized(pert, video, T, C, H, W)
+    
     else:
-        # Apply perturbation to entire video
+        # Apply perturbation to entire video (FrameRemove, FrameSwitch, etc.)
         return pert(video)
 
 
