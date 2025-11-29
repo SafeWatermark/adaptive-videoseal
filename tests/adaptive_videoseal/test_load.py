@@ -124,3 +124,74 @@ def test_adaptive_videoseal_embed_matches_parent():
         "[ERROR] msgs mismatch between Videoseal and AdaptiveVideoseal.\n"
         f"  • Max diff:       {diff.max().item()}\n"
     )
+
+
+def test_adaptive_videoseal_detached_from_parent():
+    """
+    AdaptiveVideoseal should behave independently from its parent Videoseal
+    when their attributes are modified separately.
+
+    In this test:
+      • We deliberately set different blender.scaling_w values in the parent
+        and the adapted child model.
+      • Therefore, the *watermarked images (imgs_w)* should differ.
+      • However, the *embedded message (msgs)* should remain identical,
+        because the same message is passed as input and message generation
+        is independent of the watermarked-image differences.
+    """
+
+    # Load parent & converted model
+    model = get_videoseal()
+    adaptive = AdaptiveVideoseal.from_videoseal(model)
+
+    # Modify attributes independently
+    model.blender.scaling_w = 0.4
+    adaptive.blender.scaling_w = 0.2
+
+    # Prepare random image + message(intentionally F = 1 to deactivate scene detection)
+    F, C, H, W = 1, 3, 224, 224
+    imgs = torch.randn(F, C, H, W).clamp_(0.0, 1.0)
+    msgs = model.get_random_msg()
+
+    # Forward pass
+    outputs = model.embed(
+        imgs,
+        msgs=msgs,
+        is_video=True,
+        lowres_attenuation=True,
+    )
+    adaptive_outputs = adaptive.embed(
+        imgs,
+        msgs=msgs,
+        is_video=True,
+        lowres_attenuation=True,
+    )
+
+    # ----------------------------------------------------------------------
+    # 1. Watermarked image comparison
+    # Because scaling_w was changed independently, the watermarked outputs
+    # MUST differ between parent and child models.
+    # ----------------------------------------------------------------------
+    diff_w = (outputs["imgs_w"] - adaptive_outputs["imgs_w"]).abs()
+    assert not torch.allclose(
+        outputs["imgs_w"], adaptive_outputs["imgs_w"], atol=1e-6, rtol=1e-6
+    ), (
+        "[ERROR] Watermarked images (imgs_w) are unexpectedly identical.\n"
+        "Expected: Different outputs because blender.scaling_w differs.\n"
+        f"  • Max diff: {diff_w.max().item()}\n"
+    )
+
+    # ----------------------------------------------------------------------
+    # 2. Message comparison
+    # The embedded message should remain IDENTICAL because:
+    #   • We pass the same `msgs` argument to both models.
+    #   • Message embedding is independent of blender.scaling_w differences.
+    # ----------------------------------------------------------------------
+    diff_m = (outputs["msgs"] - adaptive_outputs["msgs"]).abs()
+    assert torch.allclose(
+        outputs["msgs"], adaptive_outputs["msgs"], atol=1e-6, rtol=1e-6
+    ), (
+        "[ERROR] Embedded messages (msgs) do not match.\n"
+        "Expected: Same message since the input message is identical.\n"
+        f"  • Max diff: {diff_m.max().item()}\n"
+    )

@@ -8,8 +8,20 @@ import copy
 
 class AdaptiveVideoseal(Videoseal):
     @classmethod
-    def from_videoseal(cls, model):
-        new = copy.copy(model)
+    def from_videoseal(cls, model) -> "AdaptiveVideoseal":
+        """
+        Convert a Videoseal instance to an AdaptiveVideoseal instance.
+
+        This method creates a deep copy of the model and changes its class
+        to AdaptiveVideoseal, preserving all state_dict parameters and buffers.
+
+        Args:
+            model: A Videoseal model instance to convert.
+
+        Returns:
+            An AdaptiveVideoseal instance with the same parameters as the input model.
+        """
+        new = copy.deepcopy(model)
         new.__class__ = cls
         return new
 
