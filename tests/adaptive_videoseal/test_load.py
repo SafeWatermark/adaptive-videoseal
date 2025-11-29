@@ -49,7 +49,10 @@ def test_from_videoseal():
     # Detect extra keys
     extra_keys = set(model.state_dict()) - set(adaptive.state_dict())
     if extra_keys:
-        print(f"[WARNING] Extra keys in adaptive model: {extra_keys}")
+        print(f"[WARNING] Keys in parent model but not in adaptive model: {extra_keys}")
+    missing_keys = set(adaptive.state_dict()) - set(model.state_dict())
+    if missing_keys:
+        print(f"[WARNING] Extra keys in adaptive model: {missing_keys}")
 
     # Compare tensors
     for k, v in model.state_dict().items():
@@ -66,8 +69,6 @@ def test_from_videoseal():
                 f"  • Max diff:       {diff}\n"
                 f"  • Mean diff:      {(a - v).abs().mean().item()}\n"
             )
-    for k, v in model.state_dict().items():
-        assert torch.allclose(adaptive.state_dict()[k], v), ""
 
 
 def test_adaptive_videoseal_embed_matches_parent():
@@ -110,12 +111,16 @@ def test_adaptive_videoseal_embed_matches_parent():
     diff = (outputs["imgs_w"] - adaptive_outputs["imgs_w"]).abs()
     assert torch.allclose(
         outputs["imgs_w"], adaptive_outputs["imgs_w"], atol=1e-6, rtol=1e-6
-    ), "[ERROR] imgs_w mismatch between Videoseal and AdaptiveVideoseal.\n"
-    f"  • Max diff:       {diff.max().item()}\n"
+    ), (
+        "[ERROR] imgs_w mismatch between Videoseal and AdaptiveVideoseal.\n"
+        f"  • Max diff:       {diff.max().item()}\n"
+    )
 
     # msgs comparison
     diff = (outputs["msgs"] - adaptive_outputs["msgs"]).abs()
     assert torch.allclose(
         outputs["msgs"], adaptive_outputs["msgs"], atol=1e-6, rtol=1e-6
-    ), "[ERROR] msgs mismatch between Videoseal and AdaptiveVideoseal.\n"
-    f"  • Max diff:       {diff.max().item()}\n"
+    ), (
+        "[ERROR] msgs mismatch between Videoseal and AdaptiveVideoseal.\n"
+        f"  • Max diff:       {diff.max().item()}\n"
+    )
