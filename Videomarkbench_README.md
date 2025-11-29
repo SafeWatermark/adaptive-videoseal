@@ -1,0 +1,145 @@
+# VideoMarkBench 통합 가이드
+
+## 개요
+
+이 프로젝트에 VideoMarkBench 벤치마크가 통합되어 있습니다. VideoSeal과 Adaptive VideoSeal의 robustness를 다양한 perturbation과 aggregation 전략으로 평가할 수 있습니다.
+
+## 데이터셋 구조
+
+데이터셋은 다음과 같은 구조로 되어 있어야 합니다:
+
+```
+data/videomarkbench/
+  {model}/          # Sora, Hunyuan, SVD
+    {style}/        # realistic, cartoon, sci-fi
+      {id}.mp4      # 비디오 파일
+```
+
+현재 데이터셋이 올바르게 인식되는지 확인하려면:
+
+```bash
+python -m videomarkbench.test_dataset
+```
+
+## 빠른 시작
+
+### 1. 기본 평가 (Common perturbations만)
+
+```bash
+python -m videomarkbench.main \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --output_dir outputs/videomarkbench \
+    --perturbations common \
+    --max_videos 5
+```
+
+### 2. 모든 perturbations로 평가
+
+```bash
+python -m videomarkbench.main \
+    --model adaptive-videoseal \
+    --dataset data/videomarkbench \
+    --output_dir outputs/videomarkbench \
+    --perturbations all \
+    --max_videos 10
+```
+
+### 3. 특정 aggregation 전략만 사용
+
+```bash
+python -m videomarkbench.main \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --output_dir outputs/videomarkbench \
+    --perturbations common \
+    --aggregations mean median \
+    --max_videos 5
+```
+
+## 주요 기능
+
+### Perturbations
+
+**Common (8가지):**
+- `h264_compression`: H.264 압축 (CRF 값 조정 가능)
+- `gaussian_noise`: 가우시안 노이즈
+- `gaussian_blur`: 가우시안 블러
+- `brightness_adjustment`: 밝기 조정
+- `contrast_adjustment`: 대비 조정
+- `rotation`: 회전
+- `crop_resize`: 크롭 및 리사이즈
+- `frame_dropping`: 프레임 드롭
+
+**Black-box (2가지):**
+- `square_attack`: Square Attack
+- `triangle_attack`: Triangle Attack
+
+**White-box (1가지):**
+- `wevade`: WEvade 공격
+
+### Aggregation 전략 (7가지)
+
+- `mean`: 평균
+- `median`: 중앙값
+- `majority_vote`: 다수결
+- `weighted_mean`: 가중 평균
+- `max`: 최대값
+- `min`: 최소값
+- `temporal_smoothing`: 시계열 스무딩
+
+## 출력 결과
+
+평가가 완료되면 `output_dir`에 다음 파일들이 생성됩니다:
+
+- `results.csv`: 상세 평가 결과 (각 비디오, perturbation, aggregation별 bit accuracy)
+- `summary.txt`: 요약 통계 (텍스트 형식)
+- `summary.json`: 요약 통계 (JSON 형식)
+- `logs/`: 로그 파일
+
+## 문제 해결
+
+### Import 에러
+
+만약 import 에러가 발생하면:
+
+```bash
+# 가상환경 활성화 확인
+source .venv/bin/activate  # 또는 해당하는 가상환경
+
+# 필요한 패키지 설치 확인
+uv sync
+```
+
+### 데이터셋 인식 문제
+
+데이터셋이 인식되지 않으면:
+
+```bash
+# 데이터셋 구조 확인
+python -m videomarkbench.test_dataset
+```
+
+### 모델 로딩 문제
+
+모델이 로드되지 않으면 체크포인트 파일이 올바른 위치에 있는지 확인:
+
+```bash
+ls -lh ckpts/y_256b_img.pth
+```
+
+## 고급 사용법
+
+### 커스텀 Perturbation 추가
+
+`src/videomarkbench/perturbations/common.py`에 새로운 perturbation 클래스를 추가하고 `COMMON_PERTURBATIONS` 딕셔너리에 등록하세요.
+
+### 커스텀 Aggregation 전략 추가
+
+`src/videomarkbench/aggregations.py`에 새로운 aggregation 함수를 추가하고 `AGGREGATION_STRATEGIES` 딕셔너리에 등록하세요.
+
+## 참고
+
+- 평가는 시간이 오래 걸릴 수 있습니다. `--max_videos`로 테스트할 비디오 수를 제한하세요.
+- GPU를 사용하면 훨씬 빠릅니다. `--device cuda`를 사용하세요.
+- 결과는 CSV 형식으로 저장되므로 pandas로 분석하기 쉽습니다.
