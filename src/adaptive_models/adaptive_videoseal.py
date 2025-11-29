@@ -3,9 +3,28 @@ from scene_detectors.base import SceneDetector
 import torch
 from torch.nn import functional as F
 from scene_detectors.registry import detector_registry
+import copy
 
 
 class AdaptiveVideoseal(Videoseal):
+    @classmethod
+    def from_videoseal(cls, model) -> "AdaptiveVideoseal":
+        """
+        Convert a Videoseal instance to an AdaptiveVideoseal instance.
+
+        This method creates a deep copy of the model and changes its class
+        to AdaptiveVideoseal, preserving all state_dict parameters and buffers.
+
+        Args:
+            model: A Videoseal model instance to convert.
+
+        Returns:
+            An AdaptiveVideoseal instance with the same parameters as the input model.
+        """
+        new = copy.deepcopy(model)
+        new.__class__ = cls
+        return new
+
     def set_scene_detector(self, scene_detector: SceneDetector):
         self.scene_detector = scene_detector
 
