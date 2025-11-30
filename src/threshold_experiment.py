@@ -1,3 +1,7 @@
+"""
+source: https://github.com/facebookresearch/videoseal/blob/main/videoseal/evals/step_size_eval.py
+* I tweaked the code a bit for AdaptiveVideoseal.
+"""
 import os
 from tqdm import tqdm
 from pathlib import Path

@@ -106,6 +106,25 @@ uv run scripts/sav_val_image2video.py --data_path <JPEGImages directory>
 
 각 폴더의 프레임을 하나의 `.mp4` 비디오로 자동 변환합니다.
 
+### 3.4 Scene-Detector Threshold Experiments
+
+* `src/threshold_experiment.py`를 사용해 Scene-Detector Threshold(τ)와 step_size를 실험합니다.
+
+* 아래 스크립트로 실험을 실행할 수 있습니다:
+
+  * `bash scripts/run_content_threshold_exp.sh`
+  * `bash scripts/run_hist_threshold_exp.sh`
+  * `bash scripts/run_hash_threshold_exp.sh`
+  * `bash scripts/run_lpips_threshold_exp.sh`
+
+* 출력 결과는 다음 경로에 저장됩니다:
+
+  ```
+  output/step_size_eval/<Detector>/threshold_<τ>/step_<n>/
+  ```
+
+결과 분석은 `src/notebooks/default_threshold_selection.ipynb`에서 수행하며, accuracy-embed ratio를 시각화하고 각 detector별 기본 임계값을 선택할 수 있는 분석 결과를 제공합니다.
+
 ## 4. test
 프로젝트의 주요 구성 요소는 모두 pytest 기반 단위 테스트로 검증됩니다.
 테스트 코드는 tests/ 디렉터리에 포함되어 있습니다.

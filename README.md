@@ -102,6 +102,22 @@ uv run scripts/sav_val_image2video.py --data_path <path_to_JPEGImages directory>
 
 This will generate an `.mp4` file for each directory of frames.
 
+### 3.4 Scene-Detector Threshold Experiments
+
+* Use `src/threshold_experiment.py` to sweep scene-detector thresholds and watermark step sizes.
+
+* Run the sweeps with the helper scripts:
+  * `bash scripts/run_content_threshold_exp.sh`
+  * `bash scripts/run_hist_threshold_exp.sh`
+  * `bash scripts/run_hash_threshold_exp.sh`
+  * `bash scripts/run_lpips_threshold_exp.sh`
+* Outputs are stored under:
+  ```
+  output/step_size_eval/<Detector>/threshold_<τ>/step_<n>/
+  ```
+
+Analyze results in `src/notebooks/default_threshold_selection.ipynb`, which visualizes accuracy vs. embed ratio and helps which threshold to select per detector.
+
 ## 4. Testing
 
 All major project components are validated through **pytest-based unit tests**, located in the `tests/` directory.
