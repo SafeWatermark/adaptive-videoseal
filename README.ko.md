@@ -117,6 +117,12 @@ uv run scripts/sav_val_image2video.py --data_path <JPEGImages directory>
   * `bash scripts/run_hash_threshold_exp.sh`
   * `bash scripts/run_lpips_threshold_exp.sh`
 
+* 참고 사항:
+
+  * **videoseal 1.0**은 `configs/attenuation.yaml` 설정과 `modules/jnd.py` 구현을 기반으로 `attenuation` 모듈(JND 마스킹)을 자동으로 로드합니다.
+
+  * 자세한 내용은 [videoseal issue #57](https://github.com/facebookresearch/videoseal/issues/57)을 참고하세요.
+
 * 출력 결과는 다음 경로에 저장됩니다:
 
   ```

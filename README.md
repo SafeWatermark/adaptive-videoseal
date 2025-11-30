@@ -111,6 +111,13 @@ This will generate an `.mp4` file for each directory of frames.
   * `bash scripts/run_hist_threshold_exp.sh`
   * `bash scripts/run_hash_threshold_exp.sh`
   * `bash scripts/run_lpips_threshold_exp.sh`
+
+* Notes:
+
+  * **videoseal 1.0.** automatically loads the `attenuation` module (JND masking) using `configs/attenuation.yaml` and the implementation in modules/jnd.py.
+
+  * For additional context, see [videoseal issue #57](https://github.com/facebookresearch/videoseal/issues/57).
+
 * Outputs are stored under:
   ```
   output/step_size_eval/<Detector>/threshold_<τ>/step_<n>/
