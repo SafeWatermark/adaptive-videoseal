@@ -7,7 +7,7 @@ from pathlib import Path
 import logging
 import sys
 from videoseal.utils.cfg import setup_model_from_model_card
-
+from contextlib import contextmanager
 import torch.nn as nn
 
 
@@ -67,6 +67,7 @@ def get_videoseal() -> nn.Module:
     return model
 
 
+@contextmanager
 def patch_ffmpeg_path(
     bad_path="/private/home/pfz/09-videoseal/vmaf-dev/ffmpeg-git-20240629-amd64-static/ffmpeg",
 ):
@@ -99,3 +100,8 @@ def patch_ffmpeg_path(
     subprocess.run = patched_run
 
     logging.info(f"[patch_ffmpeg_path] Patched ffmpeg: {bad_path} -> {corrected_path}")
+    try:
+        yield corrected_path
+    finally:
+        subprocess.run = original_run
+        logging.info("[patch_ffmpeg_path] Restored original subprocess.run")

@@ -2,6 +2,7 @@ import time
 import functools
 from functools import wraps
 import logging
+from utils import patch_ffmpeg_path
 
 
 def log_elapsed_time():
@@ -72,3 +73,12 @@ def make_video_mode_recorder():
         return None
 
     return on_apply_video_mode_start, records
+
+
+def patch_ffmpeg_decorator(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with patch_ffmpeg_path():
+            return func(*args, **kwargs)
+
+    return wrapper

@@ -11,10 +11,11 @@ from adaptive_models.adaptive_videoseal import AdaptiveVideoseal
 from scene_detectors.registry import detector_registry
 from utils import get_videoseal, select_device, setup_logger, setup_seed
 import omegaconf
-from utils import patch_ffmpeg_path
-from decorators import make_interceptor
+from decorators import make_interceptor, patch_ffmpeg_decorator
 
 
+# quick fix for hard coded ffmpeg bin file location in videoseal/evals/metrics
+@patch_ffmpeg_decorator
 def run_experiment(args):
     if not args.is_video:
         raise ValueError(
@@ -86,9 +87,6 @@ def run_experiment(args):
     }
 
     os.makedirs(args.output_dir, exist_ok=True)
-
-    # quick fix for hard coded ffmpeg bin file location in videoseal/evals/metrics
-    patch_ffmpeg_path()
 
     from decorators import make_video_mode_recorder
 
