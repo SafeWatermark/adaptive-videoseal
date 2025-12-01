@@ -176,8 +176,6 @@ def run_experiment(args):
             os.path.join(threshold_dir, "combined_metrics.csv"), index=False
         )
 
-        # TODO: Generate summry by thresholds
-        # Generate summary by step size & threshold
         summary_df = combined_df.groupby(["step_size"]).mean()
         summary_df.to_csv(os.path.join(threshold_dir, "summary_by_step_size.csv"))
 
@@ -334,7 +332,7 @@ if __name__ == "__main__":
     group.add_argument(
         "--output_dir",
         type=str,
-        default="output/step_size_eval",
+        default="outputs/step_size_eval",
         help="Output directory for logs and images",
     )
     group.add_argument(

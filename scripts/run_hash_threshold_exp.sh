@@ -17,7 +17,7 @@ uv run "$EXPERIMENT_SCRIPT" \
   --attenuation_config configs/attenuation.yaml \
   --videoseal_chunk_size 32 \
   --videoseal_mode repeat \
-  --output_dir output/step_size_eval \
+  --output_dir outputs/step_size_eval \
   --save_first 1 \
   --only_identity True \
   --skip_image_metrics True \
