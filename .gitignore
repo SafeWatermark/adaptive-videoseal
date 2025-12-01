@@ -24,5 +24,3 @@ ckpts/
 # test
 htmlcov
 .coverage
-
-output/
