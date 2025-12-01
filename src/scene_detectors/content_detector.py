@@ -50,10 +50,11 @@ class ContentDetector(SceneDetector):
 
     def __init__(
         self,
-        threshold: float = 27.0,
+        threshold: float = 42.0,
         weights: ComponentWeights = ComponentWeights(),
         **kwargs,
     ):
+        """We encourage to set the step_size 16 for ensuring minimum quality. (.99 in sa-v validation)"""
         self.threshold = threshold
         self.weights = weights
         self.normalizer = sum(asdict(self.weights).values())

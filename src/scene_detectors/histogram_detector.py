@@ -9,8 +9,9 @@ class HistogramDetector(SceneDetector):
     """based on https://github.com/Breakthrough/PySceneDetect"""
 
     def __init__(
-        self, threshold: float = 0.05, bins: int = 256, device: str = "auto", **kwargs
+        self, threshold: float = 0.15, bins: int = 256, device: str = "auto", **kwargs
     ):
+        """We encourage to set the step_size 16 for ensuring minimum quality. (.99 in sa-v validation)"""
         # Internally, threshold represents the correlation between two histograms and has values
         # between -1.0 and 1.0.
         self.threshold = max(0.0, min(1.0, 1.0 - threshold))

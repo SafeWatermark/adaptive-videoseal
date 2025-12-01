@@ -8,10 +8,11 @@ class LpipsDetector(SceneDetector):
     def __init__(
         self,
         net: str = "alex",  # 'alex', 'vgg','squeeze'
-        threshold: float = 0.1,  # we need to figure out the appropriate default threshold
+        threshold: float = 0.125,
         device: str = "auto",
         **kwargs,
     ):
+        """We encourage to set the step_size 16 for ensuring minimum quality. (.99 in sa-v validation)"""
         self.lpips = lpips.LPIPS(net=net)
         if device == "auto":
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
