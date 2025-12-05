@@ -178,7 +178,17 @@ def detect_video(
         if not in_bytes:
             break
         frame = np.frombuffer(in_bytes, np.uint8).reshape([height, width, 3])
+        ################# gaussian noised image for watermarking difference
+        mean = 0
+        std = 5  # adjust noise strength (typical range: 5–50)
+        # generate noise
+        noise = np.random.normal(mean, std, frame.shape).astype(np.int16)
+        noisy_frame = frame.astype(np.int16) + noise
+        noisy_frame = np.clip(noisy_frame, 0, 255).astype(np.uint8)
+        frame = noisy_frame
+        ################
         chunk[frame_count % chunk_size] = frame
+
         frame_count += 1
         pbar.update(1)
         if frame_count % chunk_size == 0:
