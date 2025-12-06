@@ -93,6 +93,44 @@ bash scripts/run_lpips_detector.sh # lpips detector를 활용한 experiment 실�
 * `outputs/adaptive_1.mp4` → 적응형 모델 워터마킹 결과
 * `outputs/*.txt` → 재현 가능한 페이로드 비트 저장
 
+### 3.3 SA-V validation 이미지 → 비디오 변환
+
+SA-V validation 데이터셋은 각 샘플이 **JPEG 이미지 시퀀스(프레임 폴더)** 형태로 제공됩니다.
+Adaptive VideoSeal로 평가하려면 먼저 이 이미지 프레임들을 MP4 비디오로 변환해야 합니다.
+
+이를 위한 간단한 유틸리티 스크립트를 제공합니다:
+
+```bash
+uv run scripts/sav_val_image2video.py --data_path <JPEGImages directory>
+```
+
+각 폴더의 프레임을 하나의 `.mp4` 비디오로 자동 변환합니다.
+
+### 3.4 Scene-Detector Threshold Experiments
+
+* `src/threshold_experiment.py`를 사용해 Scene-Detector Threshold(τ)와 step_size를 실험합니다.
+
+* 아래 스크립트로 실험을 실행할 수 있습니다:
+
+  * `bash scripts/run_content_threshold_exp.sh`
+  * `bash scripts/run_hist_threshold_exp.sh`
+  * `bash scripts/run_hash_threshold_exp.sh`
+  * `bash scripts/run_lpips_threshold_exp.sh`
+
+* 참고 사항:
+
+  * **videoseal 1.0**은 `configs/attenuation.yaml` 설정과 `modules/jnd.py` 구현을 기반으로 `attenuation` 모듈(JND 마스킹)을 자동으로 로드합니다.
+
+  * 자세한 내용은 [videoseal issue #57](https://github.com/facebookresearch/videoseal/issues/57)을 참고하세요.
+
+* 출력 결과는 다음 경로에 저장됩니다:
+
+  ```
+  output/step_size_eval/<Detector>/threshold_<τ>/step_<n>/
+  ```
+
+결과 분석은 `src/notebooks/default_threshold_selection.ipynb`에서 수행하며, accuracy-embed ratio를 시각화하고 각 detector별 기본 임계값을 선택할 수 있는 분석 결과를 제공합니다.
+
 ## 4. test
 프로젝트의 주요 구성 요소는 모두 pytest 기반 단위 테스트로 검증됩니다.
 테스트 코드는 tests/ 디렉터리에 포함되어 있습니다.

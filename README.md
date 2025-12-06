@@ -73,6 +73,7 @@ bash scripts/run_hash_detector.sh        # Run experiment using the hash-based d
 bash scripts/run_lpips_detector.sh        # Run experiment using the lpips detector
 ```
 
+
 ### Execution Flow
 
 1. **Load baseline VideoSeal weights**
@@ -86,6 +87,43 @@ bash scripts/run_lpips_detector.sh        # Run experiment using the lpips detec
 * `outputs/1.mp4` → Baseline watermarking result
 * `outputs/adaptive_1.mp4` → Adaptive watermarking result
 * `outputs/*.txt` → Reproducible payload bit data
+
+### 3.3 SA-V Validation Image-to-Video Conversion
+
+The SA-V validation dataset provides each sample as a **directory of JPEG frames**.
+To evaluate Adaptive VideoSeal on this dataset, you must first convert each frame
+sequence into an MP4 video.
+
+A utility script is provided:
+
+```bash
+uv run scripts/sav_val_image2video.py --data_path <path_to_JPEGImages directory>
+```
+
+This will generate an `.mp4` file for each directory of frames.
+
+### 3.4 Scene-Detector Threshold Experiments
+
+* Use `src/threshold_experiment.py` to sweep scene-detector thresholds and watermark step sizes.
+
+* Run the sweeps with the helper scripts:
+  * `bash scripts/run_content_threshold_exp.sh`
+  * `bash scripts/run_hist_threshold_exp.sh`
+  * `bash scripts/run_hash_threshold_exp.sh`
+  * `bash scripts/run_lpips_threshold_exp.sh`
+
+* Notes:
+
+  * **videoseal 1.0.** automatically loads the `attenuation` module (JND masking) using `configs/attenuation.yaml` and the implementation in modules/jnd.py.
+
+  * For additional context, see [videoseal issue #57](https://github.com/facebookresearch/videoseal/issues/57).
+
+* Outputs are stored under:
+  ```
+  output/step_size_eval/<Detector>/threshold_<τ>/step_<n>/
+  ```
+
+Analyze results in `src/notebooks/default_threshold_selection.ipynb`, which visualizes accuracy vs. embed ratio and helps which threshold to select per detector.
 
 ## 4. Testing
 

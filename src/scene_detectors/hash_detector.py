@@ -11,11 +11,13 @@ class HashDetector(SceneDetector):
 
     def __init__(
         self,
-        threshold: float = 0.395,
+        threshold: float = 0.45,
         size: int = 16,
         lowpass: int = 2,
         **kwargs,
     ):
+        """We encourage to set the step_size 16 for ensuring minimum quality. (.99 in sa-v validation)"""
+
         # threshold: sensitivity for detecting scene change
         # size: hash block size (smaller = coarser)
         # lowpass: scaling factor to capture low-frequency structure

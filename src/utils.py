@@ -7,7 +7,7 @@ from pathlib import Path
 import logging
 import sys
 from videoseal.utils.cfg import setup_model_from_model_card
-
+from contextlib import contextmanager
 import torch.nn as nn
 
 
@@ -65,3 +65,43 @@ def get_videoseal() -> nn.Module:
     current_path = Path(__file__).resolve().parent
     model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
     return model
+
+
+@contextmanager
+def patch_ffmpeg_path(
+    bad_path="/private/home/pfz/09-videoseal/vmaf-dev/ffmpeg-git-20240629-amd64-static/ffmpeg",
+):
+    """
+    Monkey-patch subprocess.run so that any command starting with the bad ffmpeg
+    path is replaced with the real system ffmpeg.
+
+    This avoids modifying library code directly.
+    """
+    import subprocess
+    import shutil
+
+    corrected_path = shutil.which("ffmpeg")
+    if corrected_path is None:
+        raise RuntimeError("ffmpeg not found. Install ffmpeg or add it to your PATH.")
+
+    original_run = subprocess.run
+
+    def patched_run(*popenargs, **kwargs):
+        if popenargs:
+            cmd = popenargs[0]
+
+            # Handle most common case: command is a list/tuple
+            if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == bad_path:
+                new_cmd = [corrected_path, *cmd[1:]]
+                popenargs = (new_cmd, *popenargs[1:])
+
+        return original_run(*popenargs, **kwargs)
+
+    subprocess.run = patched_run
+
+    logging.info(f"[patch_ffmpeg_path] Patched ffmpeg: {bad_path} -> {corrected_path}")
+    try:
+        yield corrected_path
+    finally:
+        subprocess.run = original_run
+        logging.info("[patch_ffmpeg_path] Restored original subprocess.run")
