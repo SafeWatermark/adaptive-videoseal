@@ -12,6 +12,9 @@ from pathlib import Path
 import logging
 import json
 from datetime import datetime
+import os
+import random
+from contextlib import contextmanager
 
 import torch
 
@@ -51,9 +54,6 @@ def setup_model(model_name: str, device: torch.device, args, logger=None) -> Vid
         raise FileNotFoundError(f"Expected model card at {model_card_path}")
 
     # Load base model
-    import os
-    from contextlib import contextmanager
-
     @contextmanager
     def _temp_working_dir(path):
         """Temporarily change working directory."""
@@ -309,7 +309,6 @@ def main():
     # Randomly sample videos if max_videos is specified
     selected_files = None
     if args.max_videos and args.max_videos < len(dataset):
-        import random
         # Use fixed seed for reproducibility
         random.seed(args.seed)
         all_video_files = dataset.get_video_files()
@@ -336,7 +335,6 @@ def main():
             logger.info(f"Loaded Kinetics dataset with {len(kinetics_dataset_obj)} videos for forgery attacks")
             # Create iterator for kinetics dataset
             if args.max_videos and args.max_videos < len(kinetics_dataset_obj):
-                import random
                 random.seed(args.seed)
                 kinetics_files = kinetics_dataset_obj.get_video_files()
                 selected_kinetics_files = random.sample(kinetics_files, args.max_videos)
@@ -359,7 +357,6 @@ def main():
                 dataset=selected_dataset,
                 output_dir=output_dir,
                 logger=logger,
-                max_videos=None,  # Already sampled in main
                 max_frames_per_video=args.max_frames_per_video,
                 evaluate_forgery=True,
                 kinetics_dataset=kinetics_dataset,
@@ -431,7 +428,6 @@ def main():
                 dataset=whitebox_dataset,
                 output_dir=output_dir,
                 logger=logger,
-                max_videos=None,  # Already sampled in main
                 max_frames_per_video=args.max_frames_per_video,
                 wevade_version=args.wevade_version,
                 wevade_iteration=args.wevade_iteration,
