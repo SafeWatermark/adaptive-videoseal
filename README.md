@@ -154,7 +154,9 @@ This project includes the VideoMarkBench repository as a submodule, enabling sys
 
 #### Dataset Download
 
-To download the VideoMarkBench dataset:
+**1. VideoMarkBench Dataset (for Removal Attacks)**
+
+Download the VideoMarkBench dataset:
 
 1. Download the dataset from Kaggle: [VideoMarkBench Dataset](https://www.kaggle.com/datasets/zhengyuanjiang/videomarkbench/data)
 2. Place the dataset in the `data/videomarkbench/` directory with the following structure:
@@ -165,3 +167,82 @@ data/videomarkbench/
     {style}/        # realistic, cartoon, sci-fi
       {id}.mp4      # Video files
 ```
+
+**2. Kinetics-400 Dataset (for Forgery Attacks)**
+
+For forgery attack evaluation, you need to download a sample of the Kinetics-400 dataset. We provide a script to download a subset:
+
+```bash
+# Download a sample subset (default: 10 classes, 5 videos per class)
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics \
+    --split val \
+    --num_classes 10 \
+    --videos_per_class 5 \
+    --seed 42
+```
+
+**Options:**
+- `--output_dir`: Output directory (default: `data/kinetics`)
+- `--split`: Dataset split to download - `train`, `val`, or `test` (default: `val`)
+- `--num_classes`: Number of action classes to sample (default: 10)
+- `--videos_per_class`: Number of videos per class (default: 5)
+- `--seed`: Random seed for sampling (default: 42)
+
+**Requirements:**
+- `yt-dlp` must be installed (automatically installed via `uv sync`)
+
+The downloaded videos will be organized as:
+
+```
+data/kinetics/
+  videos/
+    {action_class}/
+      {youtube_id}_{time_start}.mp4
+```
+
+**3. Complete Dataset Structure**
+
+After downloading both datasets, your `data/` directory should have the following structure:
+
+```
+data/
+  videomarkbench/          # Removal 공격용 (생성형 AI 비디오)
+    {model}/               # Sora, Hunyuan, SVD
+      {style}/             # realistic, cartoon, sci-fi
+        {id}.mp4
+  kinetics/                # Forgery 공격용 (Kinetics-400 샘플)
+    videos/
+      {action_class}/
+        {video_id}.mp4
+```
+
+#### Running Evaluation
+
+**Common Perturbations and Whitebox Attacks:**
+
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/evaluation \
+    --max_videos 10 \
+    --evaluate_common \
+    --evaluate_whitebox \
+    --wevade_version standard \
+    --wevade_rb 0.1
+```
+
+**Key Arguments:**
+- `--dataset`: Path to VideoMarkBench dataset (used for removal attacks)
+- `--kinetics_dataset`: Path to Kinetics dataset (used for forgery attacks)
+- `--evaluate_common`: Evaluate common perturbations (JPEG, Gaussian, Crop, etc.)
+- `--evaluate_whitebox`: Evaluate whitebox attacks (WEvade)
+- `--wevade_version`: `standard` or `adaptive` (default: `standard`)
+- `--wevade_rb`: Perturbation bound (L-infinity norm) (default: 0.1)
+
+**Note:** 
+- **Removal attacks** use the VideoMarkBench dataset (generated AI videos)
+- **Forgery attacks** use the Kinetics dataset (real-world videos)
+- If `--kinetics_dataset` is not specified, forgery attacks will use the same dataset as removal attacks (for backward compatibility)

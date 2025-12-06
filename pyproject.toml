@@ -32,6 +32,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "transformers>=4.57.1",
     "albumentations>=2.0.8",
+    "yt-dlp>=2025.11.12",
 ]
 
 

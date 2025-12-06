@@ -76,26 +76,27 @@ def calculate_statistics(df: pd.DataFrame, logger: Optional[logging.Logger] = No
         stats["overall"]["FPR_count"] = int((forgery_df["detected"] == True).sum())
         stats["overall"]["forgery_total"] = int(len(forgery_df))
     
-    # Statistics by perturbation
-    for pert in df["perturbation"].unique():
-        pert_df = df[df["perturbation"] == pert]
-        pert_removal = pert_df[pert_df["attack_type"] == "removal"]
-        pert_forgery = pert_df[pert_df["attack_type"] == "forgery"]
-        
-        pert_stats = {}
-        if len(pert_removal) > 0:
-            fnr = (pert_removal["detected"] == False).sum() / len(pert_removal)
-            pert_stats["FNR"] = float(fnr)
-            pert_stats["FNR_count"] = int((pert_removal["detected"] == False).sum())
-            pert_stats["removal_total"] = int(len(pert_removal))
-        
-        if len(pert_forgery) > 0:
-            fpr = (pert_forgery["detected"] == True).sum() / len(pert_forgery)
-            pert_stats["FPR"] = float(fpr)
-            pert_stats["FPR_count"] = int((pert_forgery["detected"] == True).sum())
-            pert_stats["forgery_total"] = int(len(pert_forgery))
-        
-        stats["by_perturbation"][pert] = pert_stats
+    # Statistics by perturbation (if perturbation column exists)
+    if "perturbation" in df.columns:
+        for pert in df["perturbation"].unique():
+            pert_df = df[df["perturbation"] == pert]
+            pert_removal = pert_df[pert_df["attack_type"] == "removal"]
+            pert_forgery = pert_df[pert_df["attack_type"] == "forgery"]
+            
+            pert_stats = {}
+            if len(pert_removal) > 0:
+                fnr = (pert_removal["detected"] == False).sum() / len(pert_removal)
+                pert_stats["FNR"] = float(fnr)
+                pert_stats["FNR_count"] = int((pert_removal["detected"] == False).sum())
+                pert_stats["removal_total"] = int(len(pert_removal))
+            
+            if len(pert_forgery) > 0:
+                fpr = (pert_forgery["detected"] == True).sum() / len(pert_forgery)
+                pert_stats["FPR"] = float(fpr)
+                pert_stats["FPR_count"] = int((pert_forgery["detected"] == True).sum())
+                pert_stats["forgery_total"] = int(len(pert_forgery))
+            
+            stats["by_perturbation"][pert] = pert_stats
     
     # Statistics by aggregation
     for agg in df["aggregation"].unique():

@@ -534,6 +534,7 @@ def evaluate_common_perturbations(
     max_videos: Optional[int] = None,
     max_frames_per_video: Optional[int] = None,
     evaluate_forgery: bool = True,
+    kinetics_dataset: Optional[Iterator[Tuple[torch.Tensor, Dict]]] = None,
 ) -> pd.DataFrame:
     """
     Evaluate model under common perturbations.
@@ -567,6 +568,10 @@ def evaluate_common_perturbations(
             logger.info("Evaluating both removal and forgery attacks")
 
         video_count = 0
+        kinetics_iter = None
+        if kinetics_dataset is not None:
+            kinetics_iter = iter(kinetics_dataset)
+        
         for video, video_info in dataset:
             if max_videos and video_count >= max_videos:
                 break
@@ -580,12 +585,28 @@ def evaluate_common_perturbations(
                 video = video[:max_frames_per_video]
 
             # Embed watermark for removal attack (cache results for reuse)
+            # Note: Removal attack uses videomarkbench dataset (current video)
             with torch.no_grad():
                 embed_result = model.embed(video)
                 watermarked_video = embed_result["watermarked_video"]
                 embedded_message = embed_result["message"]
                 # Pre-convert to long for reuse (avoid repeated conversions)
                 embedded_message_long = embedded_message.long()
+            
+            # Get kinetics video for forgery attack (if available)
+            original_video_forgery = None
+            video_name_forgery = video_name
+            if evaluate_forgery and kinetics_iter is not None:
+                try:
+                    kinetics_video, kinetics_metadata = next(kinetics_iter)
+                    original_video_forgery = kinetics_video.to(video.device)
+                    video_name_forgery = kinetics_metadata.get("video_name", f"kinetics_{video_count}")
+                    # Limit frames if specified
+                    if max_frames_per_video and original_video_forgery.shape[0] > max_frames_per_video:
+                        original_video_forgery = original_video_forgery[:max_frames_per_video]
+                except StopIteration:
+                    logger.warning(f"Kinetics dataset exhausted, skipping forgery for {video_name}")
+                    original_video_forgery = None
             
             # Note: No caching of perturbation results to save memory
             # Each perturbation is only used once, so caching doesn't help
@@ -669,10 +690,18 @@ def evaluate_common_perturbations(
 
                 # ===== FORGERY ATTACK =====
                 if evaluate_forgery:
+                    # Use kinetics dataset for forgery attack (as per original implementation)
+                    # If kinetics_dataset is provided, use it; otherwise use the same dataset
+                    if original_video_forgery is not None:
+                        forgery_video = original_video_forgery
+                    else:
+                        # Fallback: use same dataset (for backward compatibility)
+                        forgery_video = video
+                    
                     # Apply perturbation to original (unwatermarked) video
                     with torch.no_grad():
                         try:
-                            perturbed_original = _apply_perturbation(pert, video, pert_name)
+                            perturbed_original = _apply_perturbation(pert, forgery_video, pert_name)
                         except Exception as e:
                             logger.warning(f"Error applying {display_name} (forgery): {e}")
                             continue
@@ -713,7 +742,7 @@ def evaluate_common_perturbations(
                             # Use GPU tensor version for better performance
                             detected_forgery = _call_with_watermark_gt_tensor(agg_func, logits_forgery_matched, watermark_gt_forgery)
                             results.append({
-                                "video": video_name,
+                                "video": video_name_forgery,
                                 "perturbation": display_name,
                                 "perturbation_params": str(pert_params),
                                 "aggregation": agg_name,

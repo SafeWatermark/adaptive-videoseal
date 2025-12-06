@@ -28,7 +28,9 @@ git submodule update --init --recursive
 
 ## 데이터셋 구조
 
-데이터셋은 다음과 같은 구조로 되어 있어야 합니다:
+평가를 위해서는 두 가지 데이터셋이 필요합니다:
+
+**1. VideoMarkBench 데이터셋 (Removal 공격용):**
 
 ```
 data/videomarkbench/
@@ -36,6 +38,33 @@ data/videomarkbench/
     {style}/        # realistic, cartoon, sci-fi
       {id}.mp4      # 비디오 파일
 ```
+
+**2. Kinetics-400 데이터셋 (Forgery 공격용):**
+
+Kinetics-400 샘플을 다운로드하려면:
+
+```bash
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics \
+    --split val \
+    --num_classes 10 \
+    --videos_per_class 5 \
+    --seed 42
+```
+
+다운로드된 구조:
+
+```
+data/kinetics/
+  videos/
+    {action_class}/
+      {youtube_id}_{time_start}.mp4
+```
+
+**참고:** 
+- Removal 공격은 VideoMarkBench 데이터셋 사용
+- Forgery 공격은 Kinetics 데이터셋 사용
+- `--kinetics_dataset`이 지정되지 않으면 forgery 공격도 VideoMarkBench 데이터셋 사용 (하위 호환성)
 
 ## 빠른 시작
 
@@ -62,17 +91,32 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 bash scripts/run_videomarkbench.sh adaptive-videoseal 5
 ```
 
-### 3. 모든 평가 타입 실행 (향후 구현)
+### 3. Whitebox Attacks 평가
 
 ```bash
 PYTHONPATH=src uv run python src/evaluate/main.py \
     --model videoseal \
     --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/videomarkbench \
+    --max_videos 10 \
+    --evaluate_whitebox \
+    --wevade_version standard \
+    --wevade_rb 0.1
+```
+
+### 4. 모든 평가 타입 실행
+
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
     --output_dir outputs/videomarkbench \
     --evaluate_common \
-    --evaluate_blackbox_forgery \
-    --evaluate_blackbox_removal \
     --evaluate_whitebox
+    # --evaluate_blackbox_forgery (향후 구현)
+    # --evaluate_blackbox_removal (향후 구현)
 ```
 
 ## 평가 타입
@@ -112,11 +156,40 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
   - Square Attack removal
   - Triangle Attack removal
 
-### Whitebox Attacks (향후 구현 예정)
+### Whitebox Attacks (구현 완료)
 
 - **WEvade**: White-box 공격
-  - Forgery: 원본 비디오에 워터마크 위조
-  - Removal: 워터마크 제거
+  - **Standard WEvade**: Full PGD-style attack with MSE loss, configurable parameters
+  - **Adaptive WEvade**: Simplified attack with fixed parameters (20 iterations, lr=0.02)
+  - **Forgery**: 원본 비디오에 워터마크 위조 (Kinetics 데이터셋 사용)
+  - **Removal**: 워터마크 제거 (VideoMarkBench 데이터셋 사용)
+
+**데이터셋 사용:**
+- **Removal 공격**: VideoMarkBench 데이터셋 사용 (생성형 AI 비디오)
+- **Forgery 공격**: Kinetics-400 데이터셋 사용 (실제 비디오)
+
+**파라미터:**
+- `--wevade_version`: `standard` 또는 `adaptive` (기본값: `standard`)
+- `--wevade_iteration`: Standard 버전의 최대 반복 횟수 (기본값: 200)
+- `--wevade_epsilon`: Early stopping 임계값 (기본값: 4/96)
+- `--wevade_alpha`: Learning rate (기본값: 0.01)
+- `--wevade_rb`: Perturbation bound (L-infinity norm) (기본값: 0.1)
+- `--wevade_type`: `WEvade-W-I` 또는 `WEvade-W-II` (기본값: `WEvade-W-I`)
+- `--secret_size`: 워터마크 크기 (기본값: 96, 모델에서 자동 감지됨)
+
+**실행 예시:**
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/whitebox_eval \
+    --max_videos 10 \
+    --evaluate_whitebox \
+    --wevade_version standard \
+    --wevade_rb 0.1 \
+    --wevade_alpha 0.01
+```
 
 ## Aggregation 전략 (8가지)
 
@@ -135,13 +208,26 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 
 평가가 완료되면 `output_dir`에 다음 파일들이 생성됩니다:
 
+**Common Perturbations:**
 - `common_perturbations_results.csv`: Common perturbations 평가 결과
   - 각 비디오, perturbation, aggregation, attack_type(removal/forgery)별 detection 결과
-  - 비디오 이름은 상대 경로 형식 (예: `Hunyuan/cartoon/1.mp4`)
+  - Removal: VideoMarkBench 비디오 이름 (예: `Hunyuan/cartoon/1.mp4`)
+  - Forgery: Kinetics 비디오 이름 (예: `kinetics_1`)
 - `common_perturbations_stats.json`: 통계 정보
   - 전체 FNR/FPR 통계
   - Perturbation별 통계
   - Aggregation별 통계
+
+**Whitebox Attacks:**
+- `whitebox_results.csv`: Whitebox attacks 평가 결과
+  - 각 비디오, wevade_version, aggregation, attack_type(removal/forgery)별 detection 결과
+  - Removal: VideoMarkBench 비디오 이름 (예: `video_0`)
+  - Forgery: Kinetics 비디오 이름 (예: `kinetics_0`)
+- `whitebox_stats.json`: 통계 정보
+  - 전체 FNR/FPR 통계
+  - Aggregation별 통계
+
+**공통:**
 - `summary.json`: 평가 요약 정보
 - `logs/`: 로그 파일
 
@@ -213,7 +299,11 @@ ls -la data/videomarkbench/
   - `model_wrapper.py`: VideoSeal 및 AdaptiveVideoSeal 래퍼
   - `dataset_loader.py`: 데이터셋 로더
   - `common_evaluator.py`: Common perturbations 평가 엔진
+  - `whitebox_evaluator.py`: Whitebox attacks 평가 엔진
   - `utils.py`: 통계 계산 등 유틸리티 함수
+
+- `scripts/`: 유틸리티 스크립트
+  - `download_kinetics_sample.py`: Kinetics-400 샘플 다운로드 스크립트
 
 ## 참고
 
