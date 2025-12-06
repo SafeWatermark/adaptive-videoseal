@@ -303,7 +303,7 @@ def main():
         logger.info("Please download the VideoMarkBench dataset and place it in the specified location.")
         return
 
-    dataset = VideoMarkBenchDataset(dataset_path)
+    dataset = VideoMarkBenchDataset(dataset_path, logger=logger)
     logger.info(f"Loaded dataset with {len(dataset)} videos")
 
     # Randomly sample videos if max_videos is specified
@@ -331,7 +331,7 @@ def main():
     if args.kinetics_dataset:
         kinetics_path = Path(args.kinetics_dataset)
         if kinetics_path.exists():
-            kinetics_dataset_obj = VideoMarkBenchDataset(kinetics_path)
+            kinetics_dataset_obj = VideoMarkBenchDataset(kinetics_path, logger=logger)
             logger.info(f"Loaded Kinetics dataset with {len(kinetics_dataset_obj)} videos for forgery attacks")
             # Create iterator for kinetics dataset
             if args.max_videos and args.max_videos < len(kinetics_dataset_obj):

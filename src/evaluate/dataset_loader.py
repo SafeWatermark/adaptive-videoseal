@@ -7,9 +7,9 @@ Loads videos from the VideoMarkBench dataset structure.
 import torch
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Iterator, Tuple
+from typing import List, Dict, Iterator, Tuple, Optional
 import os
-import warnings
+import logging
 
 # Try to use decord for faster video loading, fallback to cv2 if not available
 try:
@@ -31,15 +31,17 @@ class VideoMarkBenchDataset:
           {id}.mp4      # Video files
     """
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, logger: Optional[logging.Logger] = None):
         """
         Initialize VideoMarkBench dataset.
 
         Args:
             data_dir: Root directory containing VideoMarkBench videos
+            logger: Optional logger for logging warnings and errors
         """
         self.data_dir = Path(data_dir)
         self.video_files: List[Path] = []
+        self.logger = logger if logger is not None else logging.getLogger(__name__)
         self._load_video_list()
 
     def _load_video_list(self):
@@ -78,7 +80,7 @@ class VideoMarkBenchDataset:
                 video_info = self._parse_video_info(video_path)
                 yield video, video_info
             except Exception as e:
-                print(f"Error loading {video_path}: {e}")
+                self.logger.warning(f"Error loading {video_path}: {e}")
                 continue
 
     def __iter__(self) -> Iterator[Tuple[torch.Tensor, Dict]]:
@@ -96,7 +98,7 @@ class VideoMarkBenchDataset:
                 video_info = self._parse_video_info(video_path)
                 yield video, video_info
             except Exception as e:
-                print(f"Error loading {video_path}: {e}")
+                self.logger.warning(f"Error loading {video_path}: {e}")
                 continue
 
     def _load_video(self, video_path: Path) -> torch.Tensor:
@@ -129,6 +131,8 @@ class VideoMarkBenchDataset:
         
         try:
             # Load video with decord (supports batch loading)
+            # Note: 512x512 is the standard resolution for VideoMarkBench dataset.
+            # VideoSeal model processes at 256x256 internally, but input videos are loaded at 512x512.
             vr = VideoReader(str(video_path), width=512, height=512, num_threads=4, ctx=cpu(0))
             
             # Get all frames at once (much faster than frame-by-frame)
@@ -146,7 +150,7 @@ class VideoMarkBenchDataset:
             return vid_tensor
             
         except Exception as e:
-            warnings.warn(f"Error loading video with decord: {e}, falling back to cv2")
+            self.logger.warning(f"Error loading video with decord: {e}, falling back to cv2")
             return self._load_video_cv2(video_path)
     
     def _load_video_cv2(self, video_path: Path) -> torch.Tensor:
@@ -170,6 +174,8 @@ class VideoMarkBenchDataset:
                 break
 
             # Convert BGR to RGB and resize to 512x512
+            # Note: 512x512 is the standard resolution for VideoMarkBench dataset.
+            # VideoSeal model processes at 256x256 internally, but input videos are loaded at 512x512.
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame = cv2.resize(frame, (512, 512))
             # Convert to tensor: (H, W, C) -> (C, H, W)
