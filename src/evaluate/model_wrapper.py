@@ -131,17 +131,27 @@ class VideoMarkBenchModel:
         Returns:
             Dictionary with 'preds' key containing predictions
         """
+        video = video.to(self.device)
+
+        # Ensure video is in correct format: (T, C, H, W)
         if is_video:
-            logits = self.extract(video)
-            # Add detection bit (always 1 for watermarked videos)
-            detection_bit = torch.ones(logits.shape[0], 1, device=logits.device)
-            preds = torch.cat([detection_bit, logits], dim=1)
+            if video.dim() == 3:  # (C, H, W) - single frame
+                video = video.unsqueeze(0)  # (1, C, H, W)
+            elif video.dim() == 4:  # Should be (T, C, H, W)
+                pass  # Already correct
+            elif video.dim() == 5:  # (B, T, C, H, W)
+                video = video.squeeze(0)  # (T, C, H, W)
+            else:
+                raise ValueError(f"Unexpected video shape: {video.shape}")
         else:
             # Single frame
             if video.dim() == 3:
                 video = video.unsqueeze(0)
-            outputs = self.model.detect(video, is_video=False)
-            preds = outputs["preds"]
+
+        # Use actual detection results from model (including real detection bit)
+        with torch.no_grad():
+            outputs = self.model.detect(video, is_video=is_video)
+            preds = outputs["preds"]  # (T, K+1) where first column is actual detection bit
 
         return {"preds": preds}
 
