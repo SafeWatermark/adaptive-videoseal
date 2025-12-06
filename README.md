@@ -105,3 +105,25 @@ The `conftest.py` file fixes a global random seed to ensure experiment reproduci
 
 * Enable `pre-commit` to maintain consistent code style
 * Run `scripts/format.sh` regularly to auto-format and clean your code
+
+## 6. Evaluation
+
+### VideoMarkBench
+
+This project includes the VideoMarkBench repository as a submodule, enabling systematic evaluation of the robustness of VideoSeal and AdaptiveVideoSeal.
+
+📄 For detailed information → [VideoMarkBench Integration Guide](Videomarkbench_README.md)
+
+#### Dataset Download
+
+To download the VideoMarkBench dataset:
+
+1. Download the dataset from Kaggle: [VideoMarkBench Dataset](https://www.kaggle.com/datasets/zhengyuanjiang/videomarkbench/data)
+2. Place the dataset in the `data/videomarkbench/` directory with the following structure:
+
+```
+data/videomarkbench/
+  {model}/          # Sora, Hunyuan, SVD
+    {style}/        # realistic, cartoon, sci-fi
+      {id}.mp4      # Video files
+```

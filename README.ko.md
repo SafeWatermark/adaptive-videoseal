@@ -112,3 +112,25 @@ conftest.py에서 모든 테스트의 랜덤 시드(seed) 를 고정하여
 
 * `pre-commit`을 활성화해 코드 스타일 일관성 유지
 * `scripts/format.sh` 실행으로 코드 자동 정리
+
+## 6. Evaluation
+
+### VideoMarkBench
+
+본 프로젝트는 VideoMarkBench 레포지토리를 submodule로 포함하며, VideoSeal 및 AdaptiveVideoSeal의 강건성을 체계적으로 평가할 수 있습니다.
+
+📄 자세한 설명 보기 → [VideoMarkBench 통합 가이드](Videomarkbench_README.md)
+
+#### Dataset Download
+
+VideoMarkBench 데이터셋을 다운로드하려면:
+
+1. Kaggle에서 데이터셋을 다운로드하세요: [VideoMarkBench Dataset](https://www.kaggle.com/datasets/zhengyuanjiang/videomarkbench/data)
+2. 데이터셋을 `data/videomarkbench/` 디렉토리에 다음 구조로 배치하세요:
+
+```
+data/videomarkbench/
+  {model}/          # Sora, Hunyuan, SVD
+    {style}/        # realistic, cartoon, sci-fi
+      {id}.mp4      # Video files
+```
