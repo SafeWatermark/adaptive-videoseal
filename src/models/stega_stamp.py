@@ -7,6 +7,7 @@ STEGA_STAMP_IMAGE_WIDTH = 400
 STEGA_STAMP_SCALING_W = 1.0
 STEGA_STAMP_SCALING_I = 1.0
 STEGA_STAMP_ATTENUATION = None
+STEGA_STAMP_NUM_BITS = 100
 
 
 class ONNXStegaStamp(nn.Module):
@@ -22,7 +23,7 @@ class ONNXStegaStamp(nn.Module):
 class ONNXStegaStampEncoder(ONNXStegaStamp):
     def __init__(self, onnx_path: str):
         super().__init__(onnx_path)
-        self.num_bits = 100
+        self.num_bits = STEGA_STAMP_NUM_BITS
 
     def forward(
         self, image: torch.Tensor, secret: torch.Tensor
@@ -35,7 +36,7 @@ class ONNXStegaStampEncoder(ONNXStegaStamp):
 class ONNXStegaStampDecoder(ONNXStegaStamp):
     def __init__(self, onnx_path: str):
         super().__init__(onnx_path)
-        self.num_bits = 100
+        self.num_bits = STEGA_STAMP_NUM_BITS
 
     def forward(self, watermark_image: torch.Tensor) -> torch.Tensor:
         dummy_secret = torch.zeros(
