@@ -8,7 +8,15 @@ import logging
 import sys
 from videoseal.utils.cfg import setup_model_from_model_card
 from contextlib import contextmanager
-import torch.nn as nn
+from models.embedder import StegaStampEmbedder
+from models.extractor import StegaStampExtractor
+from models.stega_stamp import (
+    STEGA_STAMP_IMAGE_WIDTH,
+    STEGA_STAMP_ATTENUATION,
+    STEGA_STAMP_SCALING_W,
+    STEGA_STAMP_SCALING_I,
+)
+from videoseal.models import Videoseal
 
 
 def setup_seed(seed: int):
@@ -61,7 +69,7 @@ def select_device(device_choice: str):
     return device
 
 
-def get_videoseal() -> nn.Module:
+def get_videoseal() -> Videoseal:
     current_path = Path(__file__).resolve().parent
     model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
     return model
@@ -105,3 +113,36 @@ def patch_ffmpeg_path(
     finally:
         subprocess.run = original_run
         logging.info("[patch_ffmpeg_path] Restored original subprocess.run")
+
+
+def get_stega_stamp_videoseal(onnx_path: str) -> Videoseal:
+    """
+    Configure a VideoSeal model to use StegaStamp for watermark embedding and extraction.
+
+    Key behavior and requirements:
+    - StegaStamp expects a *1:1 blend* between the original image and the watermark residual.
+      Therefore, both `blender.scaling_i` and `blender.scaling_w` must be set to `1.0`.
+
+    - VideoSeal 1.0 enables attenuation by default, but StegaStamp does NOT use attenuation.
+      Set `model.attenuation = None` to disable it.
+
+    - StegaStamp produces an encoded image by:
+          encoded = torch.clamp(image + residual, 0, 1)
+
+    - Detection accuracy drops significantly if `scaling_w < scaling_i`.
+      Keep both equal (1.0).
+
+    - StegaStamp supports only 400×400 images, so the model's image size is fixed at 400.
+
+    This function loads the base VideoSeal model, replaces its embedder and detector
+    with StegaStamp modules, and applies the necessary configuration.
+    """
+    model = get_videoseal()
+    model.embedder = StegaStampEmbedder(onnx_path)
+    model.detector = StegaStampExtractor(onnx_path)
+
+    model.img_size = STEGA_STAMP_IMAGE_WIDTH
+    model.attenuation = STEGA_STAMP_ATTENUATION
+    model.blender.scaling_i = STEGA_STAMP_SCALING_I
+    model.blender.scaling_w = STEGA_STAMP_SCALING_W
+    return model

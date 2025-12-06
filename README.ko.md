@@ -73,10 +73,10 @@ AdaptiveVideoseal은 장면 변화(scene change)를 감지해 키프레임 선�
 ### 3.2 Adaptive watermarking 실험
 
 ```bash
-bash scripts/run_content_detector.sh # content_detector를 활용한 experiment 실행
-bash scripts/run_histogram_detector.sh # histogram detector를 활용한 experiment 실행
-bash scripts/run_hash_detector.sh # hash detector를 활용한 experiment 실행
-bash scripts/run_lpips_detector.sh # lpips detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_content_detector.sh     # content_detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_histogram_detector.sh   # histogram detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_hash_detector.sh        # hash detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_lpips_detector.sh        # lpips detector를 활용한 experiment 실행
 ```
 
 ### 실행 흐름

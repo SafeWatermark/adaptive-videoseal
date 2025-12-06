@@ -67,10 +67,10 @@ During experiments, you can choose a detection method using the `--scene_detecto
 ### 3.2 Adaptive Watermarking Experiment
 
 ```bash
-bash scripts/run_content_detector.sh     # Run experiment using the content-based detector
-bash scripts/run_histogram_detector.sh   # Run experiment using the histogram-based detector
-bash scripts/run_hash_detector.sh        # Run experiment using the hash-based detector
-bash scripts/run_lpips_detector.sh        # Run experiment using the lpips detector
+bash scripts/poc/videoseal/run_content_detector.sh     # Run experiment using the content-based detector
+bash scripts/poc/videoseal/run_histogram_detector.sh   # Run experiment using the histogram-based detector
+bash scripts/poc/videoseal/run_hash_detector.sh        # Run experiment using the hash-based detector
+bash scripts/poc/videoseal/run_lpips_detector.sh        # Run experiment using the lpips detector
 ```
 
 

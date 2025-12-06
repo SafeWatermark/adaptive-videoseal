@@ -3,11 +3,12 @@ EXPERIMENT_SCRIPT="src/poc.py"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 python "$EXPERIMENT_SCRIPT" \
-  --scene_detector hash \
+  --scene_detector histogram \
+  --model videoseal \
   --device auto \
   --seed 42 \
   --input_dir ./data \
-  --output_dir "./outputs/${TIMESTAMP}_hash" \
+  --output_dir "./outputs/${TIMESTAMP}_histogram" \
   --video_filename sample_movie.mp4 \
   --n_trials 30 \
   --num_frames_for_extraction 32 \

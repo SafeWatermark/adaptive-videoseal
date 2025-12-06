@@ -16,7 +16,13 @@ from videoseal.models import Videoseal
 
 from adaptive_models.adaptive_videoseal import AdaptiveVideoseal
 from decorators import log_elapsed_time
-from utils import setup_seed, setup_logger, select_device, get_videoseal
+from utils import (
+    setup_seed,
+    setup_logger,
+    select_device,
+    get_videoseal,
+    get_stega_stamp_videoseal,
+)
 from scene_detectors.registry import detector_registry
 import pandas as pd
 from datetime import datetime
@@ -236,18 +242,32 @@ def run_experiment(args):
     logger.info(f"Output dir: {output_dir}")
 
     # Fixed model paths
-    model = get_videoseal()
+    if args.model == "videoseal":
+        model = get_videoseal()
+        model.blender.scaling_w = args.scaling_w
+    elif args.model == "stega_stamp":
+        if args.onnx_path is None:
+            raise ValueError(
+                "StegaStamp requires an ONNX file. Please provide --onnx_path <path>."
+            )
+
+        model = get_stega_stamp_videoseal(args.onnx_path)
+        if args.scaling_w != 1.0:
+            logger.info(
+                f"'scaling_w' was set to {args.scaling_w}, but StegaStamp requires a 1:1 blend. "
+                "Overriding and using scaling_w = 1.0."
+            )
+        logger.info(
+            "VideoSeal 1.0 enables attenuation by default, but StegaStamp requires it to be disabled. "
+            "Attenuation has been set to None."
+        )
+
     model = model.eval().to(device)
     model.compile()
 
-    # Configuration
     model.step_size = args.step_size
-    model.blender.scaling_w *= args.scaling_w
     model.video_mode = args.video_mode
-
-    # Adaptive model setup
     adaptive_model = AdaptiveVideoseal.from_videoseal(model)
-
     # --- Scene detector selection ---
     try:
         scene_detector = detector_registry[args.scene_detector](device=args.device)
@@ -381,6 +401,19 @@ if __name__ == "__main__":
         default="content",
         choices=["content", "histogram", "hash", "lpips"],
         help="Select the scene detector type: 'content', 'histogram', 'hash' or 'lpips'.",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="videoseal",
+        choices=["videoseal", "stega_stamp"],
+        help="Watermarking model to use ('videoseal' or 'stega_stamp').",
+    )
+    parser.add_argument(
+        "--onnx_path",
+        type=str,
+        default=None,
+        help="onnx path for stega_stamp",
     )
     parser.add_argument(
         "--device",
