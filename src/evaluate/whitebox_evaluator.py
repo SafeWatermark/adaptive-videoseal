@@ -19,6 +19,7 @@ from tqdm import tqdm
 from skimage.metrics import structural_similarity
 from scipy.stats import binom
 from scipy.optimize import minimize
+from easydict import EasyDict
 
 # Add submodule to path
 submodule_path = Path(__file__).parent.parent / "videomarkbench"
@@ -35,6 +36,10 @@ from aggregation import (  # noqa: E402
     detection_majority as _detection_majority,
 )
 
+# Import original Wevade functions from videomarkbench
+from whitebox_perturbations.VideoSeal.Wevade import removal as wevade_removal, forgery as wevade_forgery  # noqa: E402
+from whitebox_perturbations.VideoSeal.Wevade_adaptive import removal as wevade_adaptive_removal, forgery as wevade_adaptive_forgery  # noqa: E402
+
 # Import common aggregation utilities
 from .aggregation_utils import (
     call_with_watermark_gt_tensor,
@@ -42,443 +47,8 @@ from .aggregation_utils import (
 )
 
 
-def project(param_data, backup, epsilon):
-    """
-    Project perturbation back to epsilon ball if it exceeds the upper bound.
-    
-    Args:
-        param_data: Current perturbed data
-        backup: Original data
-        epsilon: Scaling factor (c in the code)
-        
-    Returns:
-        Projected data
-    """
-    r = param_data - backup
-    r = epsilon * r
-    return backup + r
-
-
-def _get_detector_output(model, frame: torch.Tensor, requires_grad: bool = False) -> torch.Tensor:
-    """
-    Get detector output from model, handling gradient computation safely.
-    
-    Args:
-        model: Watermarking model (VideoMarkBenchModel wrapper or VideoSeal model)
-        frame: Input frame tensor (1, C, H, W)
-        requires_grad: Whether gradient computation is needed
-        
-    Returns:
-        Detector predictions tensor (1, K+1) where first column is detection bit
-    """
-    img_size = getattr(model, 'img_size', 256)
-    imgs_res = frame.clone()
-    
-    # Resize if needed
-    if frame.shape[-2:] != (img_size, img_size):
-        imgs_res = F.interpolate(frame, size=(img_size, img_size),
-                               mode='bilinear', align_corners=False, antialias=True)
-    
-    imgs_res = imgs_res.to(model.device)
-    
-    # Try to use detector directly if available and gradient is needed
-    # Check if model is a wrapper (VideoMarkBenchModel) or the actual model
-    # VideoMarkBenchModel wrapper has 'model' attribute pointing to the underlying model
-    is_wrapper = hasattr(model, 'model')
-    
-    if requires_grad:
-        # For gradient computation, always use detector directly
-        if is_wrapper and hasattr(model.model, 'detector'):
-            # VideoMarkBenchModel wrapper: access model.model.detector
-            preds = model.model.detector(imgs_res)
-        elif hasattr(model, 'detector'):
-            # Direct model access
-            preds = model.detector(imgs_res)
-        else:
-            # Fallback: use detect() method with requires_grad=True (only for VideoMarkBenchModel wrapper)
-            if is_wrapper:
-                outputs = model.detect(imgs_res, is_video=False, requires_grad=True)
-                preds = outputs["preds"]
-            else:
-                # Direct model without detector attribute - should not happen
-                raise AttributeError("Model does not have 'detector' attribute and is not a wrapper")
-    else:
-        # No gradient needed, use detect() method
-        if is_wrapper:
-            # VideoMarkBenchModel wrapper: can use requires_grad parameter
-            with torch.no_grad():
-                outputs = model.detect(imgs_res, is_video=False, requires_grad=False)
-        else:
-            # Direct model: detect() does not accept requires_grad
-            with torch.no_grad():
-                outputs = model.detect(imgs_res, is_video=False)
-        preds = outputs["preds"]
-    
-    return preds.to(frame.device)
-
-
-def _get_wevade_target_watermark(
-    watermarked_frame: torch.Tensor,
-    gt_watermark: torch.Tensor,
-    model,
-    wevade_type: str,
-    secret_size: int,
-) -> torch.Tensor:
-    """
-    Get target watermark for WEvade attack based on attack type.
-    
-    Args:
-        watermarked_frame: Single frame tensor (1, C, H, W)
-        gt_watermark: Ground truth watermark (1, K)
-        model: Watermarking model
-        wevade_type: 'WEvade-W-I' or 'WEvade-W-II'
-        secret_size: Watermark size
-        
-    Returns:
-        Target watermark tensor (1, K) in [-0.5, 0.5] range
-    """
-    if wevade_type == 'WEvade-W-II':
-        # Random target watermark
-        target_watermark = torch.randint(0, 2, (1, secret_size), device=watermarked_frame.device).float() - 0.5
-    elif wevade_type == 'WEvade-W-I':
-        # Use inverted ground truth watermark
-        # Note: For standard WEvade, we use groundtruth_watermark directly
-        # For adaptive WEvade, we use detected watermark (r_target_watermark)
-        target_watermark = 0.5 - gt_watermark
-    else:
-        raise ValueError(f"Unknown wevade_type: {wevade_type}")
-    
-    return target_watermark
-
-
-def _wevade_standard_removal_frame(
-    watermarked_frame: torch.Tensor,
-    gt_watermark: torch.Tensor,
-    model,
-    criterion: nn.Module,
-    args: Dict,
-) -> Tuple[torch.Tensor, Dict]:
-    """
-    Apply standard WEvade removal attack to a single frame.
-    
-    This is based on Wevade.py implementation with full PGD-style attack:
-    - MSE Loss
-    - Configurable iterations
-    - L∞ norm projection
-    - Early stopping
-    
-    Args:
-        watermarked_frame: Single frame tensor (1, C, H, W)
-        gt_watermark: Ground truth watermark (1, K)
-        model: Watermarking model with detect() method
-        criterion: Loss function (MSE Loss)
-        args: Attack parameters:
-            - iteration: Max iterations (default: 200)
-            - epsilon: Early stopping threshold (default: 4/96)
-            - alpha: Learning rate (default: 0.01)
-            - rb: Perturbation bound (default: 0.1)
-            - WEvade_type: 'WEvade-W-I' or 'WEvade-W-II' (default: 'WEvade-W-I')
-            - secret_size: Watermark size (default: 96)
-    
-    Returns:
-        Tuple of (attacked_frame, metrics_dict)
-        - attacked_frame: Attacked frame tensor
-        - metrics_dict: Dictionary with 'decoded_logits', 'success', etc.
-    """
-    watermarked_frame_cloned = watermarked_frame.clone()
-    groundtruth_watermark = gt_watermark.clone()
-    r = args.get('rb', 0.1)
-    lr = args.get('alpha', 0.01)
-    epsilon = args.get('epsilon', 4/96)
-    iteration = args.get('iteration', 200)
-    wevade_type = args.get('WEvade_type', 'WEvade-W-I')
-    secret_size = args.get('secret_size', 96)
-    success = False
-    
-    # Get target watermark based on WEvade type
-    target_watermark = _get_wevade_target_watermark(
-        watermarked_frame, groundtruth_watermark, model, wevade_type, secret_size
-    )
-    
-    watermarked_frame_work = watermarked_frame.clone()
-    
-    for i in range(iteration):
-        _watermarked_frame = watermarked_frame_work.requires_grad_(True)
-        min_value, max_value = torch.min(_watermarked_frame), torch.max(_watermarked_frame)
-        
-        # Enable gradient computation for model
-        preds = _get_detector_output(model, _watermarked_frame, requires_grad=True)
-        decoded_watermark = preds[:, 1:]  # Exclude detection bit
-        
-        # Compute loss
-        loss = criterion(decoded_watermark, target_watermark)
-        grads = torch.autograd.grad(loss, _watermarked_frame, create_graph=False)
-        
-        with torch.no_grad():
-            _watermarked_frame -= lr * torch.sign(grads[0])
-            _watermarked_frame = torch.clamp(_watermarked_frame, min_value, max_value)
-        
-        del grads, loss
-        
-        # Projection
-        perturbation_norm = torch.norm(_watermarked_frame - watermarked_frame_cloned, float('inf'))
-        if perturbation_norm.item() >= r:
-            c = r / perturbation_norm.item()
-            _watermarked_frame = project(_watermarked_frame, watermarked_frame_cloned, c)
-        
-        # Check early stopping (no gradient needed)
-        with torch.no_grad():
-            preds_check = _get_detector_output(model, _watermarked_frame, requires_grad=False)
-            decoded_watermark = preds_check[:, 1:]
-        rounded_decoded_watermark = (decoded_watermark > 0).float()
-        bit_acc_target = rounded_decoded_watermark.eq(target_watermark).sum().item() / secret_size
-        watermarked_frame_work = _watermarked_frame
-        
-        # Early stopping
-        if bit_acc_target >= 1 - epsilon:
-            success = True
-            break
-        
-        del _watermarked_frame, decoded_watermark, bit_acc_target
-    
-    post_processed_frame = watermarked_frame_work
-    # Final detection (no gradient needed)
-    with torch.no_grad():
-        preds_final = _get_detector_output(model, post_processed_frame, requires_grad=False)
-        decoded_logits = preds_final[:, 1:].squeeze().detach().cpu()
-    
-    metrics = {
-        'decoded_logits': decoded_logits,
-        'success': success,
-    }
-    
-    return post_processed_frame, metrics
-
-
-def _wevade_standard_forgery_frame(
-    original_frame: torch.Tensor,
-    gt_watermark: torch.Tensor,
-    model,
-    criterion: nn.Module,
-    args: Dict,
-) -> Tuple[torch.Tensor, Dict]:
-    """
-    Apply standard WEvade forgery attack to a single frame.
-    
-    Args:
-        original_frame: Single frame tensor (1, C, H, W)
-        gt_watermark: Ground truth watermark (1, K)
-        model: Watermarking model with detect() method
-        criterion: Loss function (MSE Loss)
-        args: Attack parameters (same as removal)
-    
-    Returns:
-        Tuple of (attacked_frame, metrics_dict)
-    """
-    groundtruth_watermark = gt_watermark.clone()
-    groundtruth_watermark -= 0.5
-    original_frame_cloned = original_frame.clone()
-    r = args.get('rb', 0.1)
-    lr = args.get('alpha', 0.01)
-    epsilon = args.get('epsilon', 4/96)
-    iteration = args.get('iteration', 200)
-    secret_size = args.get('secret_size', 96)
-    success = False
-    
-    original_frame_work = original_frame.clone()
-    
-    for i in range(iteration):
-        _original_frame = original_frame_work.requires_grad_(True)
-        min_value, max_value = torch.min(_original_frame), torch.max(_original_frame)
-        
-        # Enable gradient computation for model
-        # Use _get_detector_output helper for gradient computation
-        preds = _get_detector_output(model, _original_frame, requires_grad=True)
-        decoded_watermark = preds[:, 1:]  # Exclude detection bit
-        
-        # Compute loss
-        loss = criterion(decoded_watermark, groundtruth_watermark)
-        grads = torch.autograd.grad(loss, _original_frame, create_graph=False)
-        
-        with torch.no_grad():
-            _original_frame -= lr * torch.sign(grads[0])
-            _original_frame = torch.clamp(_original_frame, min_value, max_value)
-        
-        del grads, loss
-        
-        # Projection
-        perturbation_norm = torch.norm(_original_frame - original_frame_cloned, float('inf'))
-        if perturbation_norm.item() >= r:
-            c = r / perturbation_norm.item()
-            _original_frame = project(_original_frame, original_frame_cloned, c)
-        
-        # Check early stopping (no gradient needed)
-        preds_check = _get_detector_output(model, _original_frame, requires_grad=False)
-        decoded_watermark = preds_check[:, 1:]
-        rounded_decoded_watermark = (decoded_watermark > 0).float()
-        # groundtruth_watermark is already in [-0.5, 0.5] range, convert to [0, 1] for comparison
-        gt_bits = (groundtruth_watermark > 0).float()
-        bit_acc_target = rounded_decoded_watermark.eq(gt_bits).sum().item() / secret_size
-        original_frame_work = _original_frame
-        
-        # Early stopping
-        if bit_acc_target >= 1 - epsilon:
-            success = True
-            break
-        
-        del _original_frame, decoded_watermark, bit_acc_target
-    
-    post_processed_frame = original_frame_work
-    # Final detection (no gradient needed)
-    preds_final = _get_detector_output(model, post_processed_frame, requires_grad=False)
-    decoded_logits = preds_final[:, 1:].squeeze().detach().cpu()
-    
-    metrics = {
-        'decoded_logits': decoded_logits,
-        'success': success,
-    }
-    
-    return post_processed_frame, metrics
-
-
-def _wevade_adaptive_removal_frame(
-    watermarked_frame: torch.Tensor,
-    gt_watermark: torch.Tensor,
-    model,
-    args: Dict,
-) -> Tuple[torch.Tensor, Dict]:
-    """
-    Apply adaptive WEvade removal attack to a single frame.
-    
-    This is based on Wevade_adaptive.py implementation:
-    - Direct loss calculation (no MSE)
-    - Fixed 20 iterations
-    - Fixed learning rate 0.02
-    - No L∞ projection
-    - No early stopping
-    
-    Args:
-        watermarked_frame: Single frame tensor (1, C, H, W)
-        gt_watermark: Ground truth watermark (1, K)
-        model: Watermarking model with detect() method
-        args: Attack parameters:
-            - WEvade_type: 'WEvade-W-I' or 'WEvade-W-II' (default: 'WEvade-W-I')
-            - secret_size: Watermark size (default: 96)
-    
-    Returns:
-        Tuple of (attacked_frame, metrics_dict)
-    """
-    watermarked_frame_cloned = watermarked_frame.clone()
-    groundtruth_watermark = gt_watermark.clone()
-    wevade_type = args.get('WEvade_type', 'WEvade-W-I')
-    secret_size = args.get('secret_size', 96)
-    
-    # WEvade_W_II target watermark selection
-    if wevade_type == 'WEvade-W-II':
-        target_watermark = torch.randint(0, 2, (1, secret_size), device=watermarked_frame.device).float() - 0.5
-    # WEvade_W_I target watermark selection
-    elif wevade_type == 'WEvade-W-I':
-        # For adaptive WEvade-W-I, use detected watermark (different from standard WEvade)
-        with torch.no_grad():
-            preds = _get_detector_output(model, watermarked_frame, requires_grad=False)
-            r_target_watermark = preds[:, 1:]  # Exclude detection bit
-        r_target_watermark = (r_target_watermark > 0).float()
-        # Adaptive WEvade uses r_target_watermark (detected watermark) as per original implementation
-        # This is different from standard WEvade which uses groundtruth_watermark
-        target_watermark = 0.5 - r_target_watermark
-    
-    watermarked_frame_work = watermarked_frame.clone()
-    
-    # Fixed 20 iterations with fixed learning rate 0.02
-    for _ in range(20):
-        watermarked_frame_work = watermarked_frame_work.requires_grad_(True)
-        
-        # Enable gradient computation for model
-        preds = _get_detector_output(model, watermarked_frame_work, requires_grad=True)
-        decoded_logits = preds[:, 1:]  # Exclude detection bit
-        
-        # Direct loss calculation
-        loss = - (target_watermark * decoded_logits).sum()
-        grads = torch.autograd.grad(loss, watermarked_frame_work, create_graph=False)
-        
-        with torch.no_grad():
-            watermarked_frame_work = watermarked_frame_work - 0.02 * torch.sign(grads[0])
-            watermarked_frame_work = torch.clamp(watermarked_frame_work, 0, 1)
-    
-    # Final detection (no gradient needed)
-    with torch.no_grad():
-        preds_final = _get_detector_output(model, watermarked_frame_work, requires_grad=False)
-        decoded_logits = preds_final[:, 1:].squeeze().detach().cpu()
-    
-    # Convert to numpy if tensor
-    if isinstance(decoded_logits, torch.Tensor):
-        decoded_logits_np = decoded_logits.numpy()
-    else:
-        decoded_logits_np = decoded_logits
-    
-    metrics = {
-        'decoded_logits': decoded_logits_np,
-    }
-    
-    return watermarked_frame_work, metrics
-
-
-def _wevade_adaptive_forgery_frame(
-    original_frame: torch.Tensor,
-    gt_watermark: torch.Tensor,
-    model,
-    args: Dict,
-) -> Tuple[torch.Tensor, Dict]:
-    """
-    Apply adaptive WEvade forgery attack to a single frame.
-    
-    Args:
-        original_frame: Single frame tensor (1, C, H, W)
-        gt_watermark: Ground truth watermark (1, K)
-        model: Watermarking model with detect() method
-        args: Attack parameters (same as adaptive removal)
-    
-    Returns:
-        Tuple of (attacked_frame, metrics_dict)
-    """
-    groundtruth_watermark = gt_watermark.clone()
-    target_watermark = groundtruth_watermark - 0.5
-    original_frame_cloned = original_frame.clone()
-    
-    original_frame_work = original_frame.clone()
-    
-    # Fixed 20 iterations with fixed learning rate 0.02
-    for _ in range(20):
-        original_frame_work = original_frame_work.requires_grad_(True)
-        
-        # Enable gradient computation for model
-        preds = _get_detector_output(model, original_frame_work, requires_grad=True)
-        decoded_watermark = preds[:, 1:]  # Exclude detection bit
-        
-        # Direct loss calculation
-        loss = - (target_watermark * decoded_watermark).sum()
-        grads = torch.autograd.grad(loss, original_frame_work, create_graph=False)
-        
-        with torch.no_grad():
-            original_frame_work = original_frame_work - 0.02 * torch.sign(grads[0])
-            original_frame_work = torch.clamp(original_frame_work, 0, 1)
-    
-    # Final detection (no gradient needed)
-    with torch.no_grad():
-        preds_final = _get_detector_output(model, original_frame_work, requires_grad=False)
-        decoded_logits = preds_final[:, 1:].squeeze().detach().cpu()
-    
-    # Convert to numpy if tensor
-    if isinstance(decoded_logits, torch.Tensor):
-        decoded_logits_np = decoded_logits.numpy()
-    else:
-        decoded_logits_np = decoded_logits
-    
-    metrics = {
-        'decoded_logits': decoded_logits_np,
-    }
-    
-    return original_frame_work, metrics
+# Original Wevade functions are imported directly from videomarkbench
+# No need for custom implementations - we use the original functions
 
 
 def _call_with_watermark_gt_tensor(
@@ -578,29 +148,32 @@ def evaluate_whitebox_attacks(
     if logger is None:
         logger = logging.getLogger(__name__)
     
-    # Prepare attack arguments
-    attack_args = {
+    # Prepare attack arguments as EasyDict (required by original Wevade functions)
+    attack_args = EasyDict({
         'iteration': wevade_iteration,
         'epsilon': wevade_epsilon,
         'alpha': wevade_alpha,
         'rb': wevade_rb,
         'WEvade_type': wevade_type,
         'secret_size': secret_size,
-    }
+    })
     
-    # Select attack functions based on version
+    # Select attack functions based on version (using original functions from videomarkbench)
     if wevade_version == "standard":
-        removal_fn = _wevade_standard_removal_frame
-        forgery_fn = _wevade_standard_forgery_frame
+        removal_fn = wevade_removal
+        forgery_fn = wevade_forgery
         criterion = nn.MSELoss().to(model.device)
-        logger.info(f"Using standard WEvade (iterations={wevade_iteration}, alpha={wevade_alpha}, rb={wevade_rb})")
+        logger.info(f"Using original standard WEvade (iterations={wevade_iteration}, alpha={wevade_alpha}, rb={wevade_rb})")
     elif wevade_version == "adaptive":
-        removal_fn = _wevade_adaptive_removal_frame
-        forgery_fn = _wevade_adaptive_forgery_frame
+        removal_fn = wevade_adaptive_removal
+        forgery_fn = wevade_adaptive_forgery
         criterion = None  # Not used in adaptive version
-        logger.info("Using adaptive WEvade (fixed 20 iterations, lr=0.02)")
+        logger.info("Using original adaptive WEvade (fixed 20 iterations, lr=0.02)")
     else:
         raise ValueError(f"Unknown wevade_version: {wevade_version}. Must be 'standard' or 'adaptive'")
+    
+    # Get actual model (unwrap VideoMarkBenchModel wrapper if needed)
+    actual_model = model.model if hasattr(model, 'model') else model
     
     results = []
     device = model.device
@@ -653,22 +226,32 @@ def evaluate_whitebox_attacks(
         attacked_frames_logits = []
         for frame_idx in range(T):
             # Clone frame and enable gradient for attack
-            frame = watermarked_video[frame_idx:frame_idx+1].clone().detach().requires_grad_(True)  # (1, C, H, W)
+            frame = watermarked_video[frame_idx:frame_idx+1].clone().detach()  # (1, C, H, W)
             
             try:
                 if wevade_version == "standard":
-                    attacked_frame, frame_metrics = removal_fn(
-                        frame, gt_watermark, model.model, criterion, attack_args
+                    # Original function returns: (bit_acc_groundtruth, bound, ssim, psnr, success, decoded_logits)
+                    bit_acc, bound, ssim, psnr, success, decoded_logits = removal_fn(
+                        frame, gt_watermark, actual_model, criterion, attack_args
                     )
                 else:
-                    attacked_frame, frame_metrics = removal_fn(
-                        frame, gt_watermark, model.model, attack_args
+                    # Adaptive function returns: (bit_acc_groundtruth, bound, ssim, psnr, decoded_logits)
+                    bit_acc, bound, ssim, psnr, decoded_logits = removal_fn(
+                        frame, gt_watermark, actual_model, attack_args
                     )
                 
-                # Extract logits
-                decoded_logits = frame_metrics['decoded_logits']
+                # Convert decoded_logits to tensor if needed
                 if isinstance(decoded_logits, np.ndarray):
                     decoded_logits = torch.from_numpy(decoded_logits)
+                elif isinstance(decoded_logits, torch.Tensor):
+                    decoded_logits = decoded_logits.cpu()
+                else:
+                    decoded_logits = torch.tensor(decoded_logits).cpu()
+                
+                # Ensure shape is (K,)
+                if decoded_logits.dim() > 1:
+                    decoded_logits = decoded_logits.squeeze()
+                
                 attacked_frames_logits.append(decoded_logits)
                 
             except Exception as e:
@@ -725,22 +308,32 @@ def evaluate_whitebox_attacks(
             attacked_frames_logits = []
             for frame_idx in range(T_forgery):
                 # Clone frame and enable gradient for attack
-                frame = original_video[frame_idx:frame_idx+1].clone().detach().requires_grad_(True)  # (1, C, H, W)
+                frame = original_video[frame_idx:frame_idx+1].clone().detach()  # (1, C, H, W)
                 
                 try:
                     if wevade_version == "standard":
-                        attacked_frame, frame_metrics = forgery_fn(
-                            frame, gt_watermark, model.model, criterion, attack_args
+                        # Original function returns: (bit_acc_groundtruth, bound, ssim, psnr, success, decoded_logits)
+                        bit_acc, bound, ssim, psnr, success, decoded_logits = forgery_fn(
+                            frame, gt_watermark, actual_model, criterion, attack_args
                         )
                     else:
-                        attacked_frame, frame_metrics = forgery_fn(
-                            frame, gt_watermark, model.model, attack_args
+                        # Adaptive function returns: (bit_acc_groundtruth, bound, ssim, psnr, decoded_logits)
+                        bit_acc, bound, ssim, psnr, decoded_logits = forgery_fn(
+                            frame, gt_watermark, actual_model, attack_args
                         )
                     
-                    # Extract logits
-                    decoded_logits = frame_metrics['decoded_logits']
+                    # Convert decoded_logits to tensor if needed
                     if isinstance(decoded_logits, np.ndarray):
                         decoded_logits = torch.from_numpy(decoded_logits)
+                    elif isinstance(decoded_logits, torch.Tensor):
+                        decoded_logits = decoded_logits.cpu()
+                    else:
+                        decoded_logits = torch.tensor(decoded_logits).cpu()
+                    
+                    # Ensure shape is (K,)
+                    if decoded_logits.dim() > 1:
+                        decoded_logits = decoded_logits.squeeze()
+                    
                     attacked_frames_logits.append(decoded_logits)
                     
                 except Exception as e:
