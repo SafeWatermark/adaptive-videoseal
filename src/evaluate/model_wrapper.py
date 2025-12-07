@@ -120,13 +120,14 @@ class VideoMarkBenchModel:
 
         return logits
 
-    def detect(self, video: torch.Tensor, is_video: bool = True) -> Dict:
+    def detect(self, video: torch.Tensor, is_video: bool = True, requires_grad: bool = False) -> Dict:
         """
         Detect watermark in video (for compatibility with original VideoMarkBench).
 
         Args:
             video: Video tensor
             is_video: Whether input is video
+            requires_grad: Whether gradient computation is needed (for whitebox attacks)
 
         Returns:
             Dictionary with 'preds' key containing predictions
@@ -149,9 +150,24 @@ class VideoMarkBenchModel:
                 video = video.unsqueeze(0)
 
         # Use actual detection results from model (including real detection bit)
-        with torch.no_grad():
-            outputs = self.model.detect(video, is_video=is_video)
-            preds = outputs["preds"]  # (T, K+1) where first column is actual detection bit
+        # If gradient computation is needed, bypass @torch.no_grad() decorator
+        # by calling detector directly (only works for single frames in whitebox attacks)
+        if requires_grad:
+            # For gradient computation, call detector directly to bypass @torch.no_grad()
+            # This is only safe for single frames (is_video=False) used in whitebox attacks
+            if not is_video and hasattr(self.model, 'detector'):
+                # Single frame case: call detector directly
+                preds = self.model.detector(video)  # (1, K+1)
+            else:
+                # Video case: still need to use detect() but it won't compute gradients
+                # This should not be used in practice for whitebox attacks
+                outputs = self.model.detect(video, is_video=is_video)
+                preds = outputs["preds"]
+        else:
+            # No gradient needed, use detect() method normally
+            with torch.no_grad():
+                outputs = self.model.detect(video, is_video=is_video)
+                preds = outputs["preds"]  # (T, K+1) where first column is actual detection bit
 
         return {"preds": preds}
 

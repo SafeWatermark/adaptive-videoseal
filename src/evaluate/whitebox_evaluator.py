@@ -35,6 +35,12 @@ from aggregation import (  # noqa: E402
     detection_majority as _detection_majority,
 )
 
+# Import common aggregation utilities
+from .aggregation_utils import (
+    call_with_watermark_gt_tensor,
+    call_with_watermark_gt_numpy,
+)
+
 
 def project(param_data, backup, epsilon):
     """
@@ -58,7 +64,7 @@ def _get_detector_output(model, frame: torch.Tensor, requires_grad: bool = False
     Get detector output from model, handling gradient computation safely.
     
     Args:
-        model: Watermarking model (VideoSeal or similar)
+        model: Watermarking model (VideoMarkBenchModel wrapper or VideoSeal model)
         frame: Input frame tensor (1, C, H, W)
         requires_grad: Whether gradient computation is needed
         
@@ -76,14 +82,34 @@ def _get_detector_output(model, frame: torch.Tensor, requires_grad: bool = False
     imgs_res = imgs_res.to(model.device)
     
     # Try to use detector directly if available and gradient is needed
-    if requires_grad and hasattr(model, 'detector'):
-        preds = model.detector(imgs_res)
-    else:
-        # Use detect() method (may have @torch.no_grad() decorator)
-        if requires_grad:
-            with torch.enable_grad():
-                outputs = model.detect(imgs_res, is_video=False)
+    # Check if model is a wrapper (VideoMarkBenchModel) or the actual model
+    # VideoMarkBenchModel wrapper has 'model' attribute pointing to the underlying model
+    is_wrapper = hasattr(model, 'model')
+    
+    if requires_grad:
+        # For gradient computation, always use detector directly
+        if is_wrapper and hasattr(model.model, 'detector'):
+            # VideoMarkBenchModel wrapper: access model.model.detector
+            preds = model.model.detector(imgs_res)
+        elif hasattr(model, 'detector'):
+            # Direct model access
+            preds = model.detector(imgs_res)
         else:
+            # Fallback: use detect() method with requires_grad=True (only for VideoMarkBenchModel wrapper)
+            if is_wrapper:
+                outputs = model.detect(imgs_res, is_video=False, requires_grad=True)
+                preds = outputs["preds"]
+            else:
+                # Direct model without detector attribute - should not happen
+                raise AttributeError("Model does not have 'detector' attribute and is not a wrapper")
+    else:
+        # No gradient needed, use detect() method
+        if is_wrapper:
+            # VideoMarkBenchModel wrapper: can use requires_grad parameter
+            with torch.no_grad():
+                outputs = model.detect(imgs_res, is_video=False, requires_grad=False)
+        else:
+            # Direct model: detect() does not accept requires_grad
             with torch.no_grad():
                 outputs = model.detect(imgs_res, is_video=False)
         preds = outputs["preds"]
@@ -266,14 +292,8 @@ def _wevade_standard_forgery_frame(
         min_value, max_value = torch.min(_original_frame), torch.max(_original_frame)
         
         # Enable gradient computation for model
-        # Call detector directly to bypass @torch.no_grad() decorator
-        img_size = getattr(model, 'img_size', 256)
-        imgs_res = _original_frame.clone()
-        if _original_frame.shape[-2:] != (img_size, img_size):
-            imgs_res = F.interpolate(_original_frame, size=(img_size, img_size),
-                                   mode='bilinear', align_corners=False, antialias=True)
-        imgs_res = imgs_res.to(model.device)
-        preds = model.detector(imgs_res).to(_original_frame.device)
+        # Use _get_detector_output helper for gradient computation
+        preds = _get_detector_output(model, _original_frame, requires_grad=True)
         decoded_watermark = preds[:, 1:]  # Exclude detection bit
         
         # Compute loss
@@ -293,14 +313,8 @@ def _wevade_standard_forgery_frame(
             _original_frame = project(_original_frame, original_frame_cloned, c)
         
         # Check early stopping (no gradient needed)
-        with torch.no_grad():
-            imgs_res_check = _original_frame.clone()
-            if _original_frame.shape[-2:] != (img_size, img_size):
-                imgs_res_check = F.interpolate(_original_frame, size=(img_size, img_size),
-                                             mode='bilinear', align_corners=False, antialias=True)
-            imgs_res_check = imgs_res_check.to(model.device)
-            preds_check = model.detector(imgs_res_check).to(_original_frame.device)
-            decoded_watermark = preds_check[:, 1:]
+        preds_check = _get_detector_output(model, _original_frame, requires_grad=False)
+        decoded_watermark = preds_check[:, 1:]
         rounded_decoded_watermark = (decoded_watermark > 0).float()
         # groundtruth_watermark is already in [-0.5, 0.5] range, convert to [0, 1] for comparison
         gt_bits = (groundtruth_watermark > 0).float()
@@ -316,15 +330,8 @@ def _wevade_standard_forgery_frame(
     
     post_processed_frame = original_frame_work
     # Final detection (no gradient needed)
-    with torch.no_grad():
-        img_size = getattr(model, 'img_size', 256)
-        imgs_res_final = post_processed_frame.clone()
-        if post_processed_frame.shape[-2:] != (img_size, img_size):
-            imgs_res_final = F.interpolate(post_processed_frame, size=(img_size, img_size),
-                                          mode='bilinear', align_corners=False, antialias=True)
-        imgs_res_final = imgs_res_final.to(model.device)
-        preds_final = model.detector(imgs_res_final).to(post_processed_frame.device)
-        decoded_logits = preds_final[:, 1:].squeeze().detach().cpu()
+    preds_final = _get_detector_output(model, post_processed_frame, requires_grad=False)
+    decoded_logits = preds_final[:, 1:].squeeze().detach().cpu()
     
     metrics = {
         'decoded_logits': decoded_logits,
@@ -480,7 +487,7 @@ def _call_with_watermark_gt_tensor(
     """
     Call aggregation function with custom watermark_gt (GPU-optimized tensor version).
     
-    This is adapted from common_evaluator.py to work with whitebox attack results.
+    Wrapper around common aggregation_utils for backward compatibility.
     
     Args:
         func: Aggregation function
@@ -490,81 +497,7 @@ def _call_with_watermark_gt_tensor(
     Returns:
         Boolean indicating if watermark is detected
     """
-    func_name = func.__name__
-    
-    # Convert logits to bits: positive -> 1, negative/zero -> 0
-    # VideoSeal convention: logits > 0 -> bit 1, logits <= 0 -> bit 0
-    predicted_bits = (decode > 0).long()  # 1 for positive, 0 for negative/zero
-    
-    # Ensure watermark_gt is on same device
-    watermark_gt = watermark_gt.to(decode.device)
-    
-    if func_name == 'logit_mean':
-        decoded = torch.mean(decode, dim=0)
-        predicted = (decoded > 0).long()
-        bitacc = torch.sum((watermark_gt == predicted).float()) / len(watermark_gt)
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'logit_g_median':
-        # For geometric median, convert to numpy (scipy.optimize required)
-        decode_np = decode.detach().cpu().numpy()
-        watermark_gt_np = watermark_gt.detach().cpu().numpy()
-        def objective(median):
-            return np.sum(np.linalg.norm(decode_np - median, axis=1))
-        initial_guess = np.mean(decode_np, axis=0)
-        decoded = minimize(objective, initial_guess, method='Powell', tol=1e-5)
-        predicted = (decoded.x > 0).astype(int)
-        bitacc = np.sum((watermark_gt_np == predicted)) / len(watermark_gt_np)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bit_majority':
-        decoded = (torch.sum(predicted_bits, dim=0) > (decode.shape[0] / 2)).long()
-        bitacc = torch.sum((watermark_gt == decoded).float()) / len(watermark_gt)
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'bit_g_median':
-        decoded = torch.median(predicted_bits.float(), dim=0)[0].long()
-        bitacc = torch.sum((watermark_gt == decoded).float()) / len(watermark_gt)
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'bitacc_mean':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float())
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'bitacc_median':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
-        median_bitacc = torch.median(bitacc)
-        return (median_bitacc >= 67/96).item()
-    
-    elif func_name == 'detection_threshold':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
-        detected_frames = torch.sum((bitacc >= 67/96).long()).item()
-        
-        n = decode.shape[0]
-        p = 0.0000661
-        threshold = 10e-4
-        k = n  # Default if no threshold found
-        for i in range(n + 1):
-            if binom.sf(i - 1, n, p) <= threshold:
-                k = i
-                break
-        
-        return detected_frames >= k
-    
-    elif func_name == 'detection_majority':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
-        detected_frames = torch.sum((bitacc >= 67/96).long()).item()
-        return detected_frames > (decode.shape[0] // 2)
-    
-    else:
-        # Fallback: convert to numpy and use original function
-        decode_np = decode.detach().cpu().numpy()
-        watermark_gt_np = watermark_gt.detach().cpu().numpy()
-        return _call_with_watermark_gt_numpy(func, decode_np, watermark_gt_np)
+    return call_with_watermark_gt_tensor(func, decode, watermark_gt)
 
 
 def _call_with_watermark_gt_numpy(
@@ -572,71 +505,18 @@ def _call_with_watermark_gt_numpy(
 ) -> bool:
     """
     Call aggregation function with custom watermark_gt (CPU/numpy version for fallback).
+    
+    Wrapper around common aggregation_utils for backward compatibility.
+    
+    Args:
+        func: Aggregation function
+        decode: Logits numpy array of shape (T, K)
+        watermark_gt: Ground truth watermark numpy array of shape (K,)
+        
+    Returns:
+        Boolean indicating if watermark is detected
     """
-    func_name = func.__name__
-    predicted_bits = (decode > 0).astype(int)
-    
-    if func_name == 'logit_mean':
-        decoded = np.mean(decode, axis=0)
-        predicted = (decoded > 0).astype(int)
-        bitacc = np.sum((watermark_gt == predicted)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'logit_g_median':
-        def objective(median):
-            return np.sum(np.linalg.norm(decode - median, axis=1))
-        initial_guess = np.mean(decode, axis=0)
-        decoded = minimize(objective, initial_guess, method='Powell', tol=1e-5)
-        predicted = (decoded.x > 0).astype(int)
-        bitacc = np.sum((watermark_gt == predicted)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bit_majority':
-        decoded = (np.sum(predicted_bits, axis=0) > (len(decode) / 2)).astype(int)
-        bitacc = np.sum((watermark_gt == decoded)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bit_g_median':
-        decoded = np.median(predicted_bits, axis=0).astype(int)
-        bitacc = np.sum((watermark_gt == decoded)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bitacc_mean':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits))
-        return bitacc >= 67/96
-    
-    elif func_name == 'bitacc_median':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits), axis=1)
-        median_bitacc = np.median(bitacc)
-        return median_bitacc >= 67/96
-    
-    elif func_name == 'detection_threshold':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits), axis=1)
-        detected_frames = np.sum(bitacc >= 67/96)
-        
-        n = decode.shape[0]
-        p = 0.0000661
-        threshold = 10e-4
-        k = n
-        for i in range(n + 1):
-            if binom.sf(i - 1, n, p) <= threshold:
-                k = i
-                break
-        
-        return detected_frames >= k
-    
-    elif func_name == 'detection_majority':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits), axis=1)
-        detected_frames = np.sum(bitacc >= 67 / 96)
-        return detected_frames > (decode.shape[0] // 2)
-    
-    else:
-        # Fallback to original function
-        return func(decode)
+    return call_with_watermark_gt_numpy(func, decode, watermark_gt)
 
 
 # Aggregation strategies

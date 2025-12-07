@@ -244,57 +244,21 @@ class MPEG4Wrapper(nn.Module):
                     pass
 
 
-def _wrap_aggregation_func(original_func, watermark_gt: np.ndarray):
-    """
-    Wrap aggregation function to use actual embedded message instead of hardcoded pattern.
-    
-    The original aggregation functions use hardcoded watermark_gt = [0, 1] * 48.
-    This wrapper replaces that with the actual embedded message.
-    """
-    import types
-    
-    # Create a new function that uses the actual watermark_gt
-    def wrapped_func(decode):
-        # Temporarily replace watermark_gt in the function's closure
-        # Since we can't modify closures directly, we'll use a different approach:
-        # We'll modify the function's globals or use a patched version
-        
-        # For functions that use watermark_gt directly, we need to patch it
-        # The original functions are in aggregation.py, so we'll create modified versions
-        
-        # Get the function's code and modify it
-        # Actually, a simpler approach: create wrapper functions that match the original API
-        # but use the actual watermark_gt
-        
-        # Since the original functions are complex, we'll recreate them with watermark_gt parameter
-        # But first, let's try to call the original and see if we can patch it
-        
-        # Actually, the cleanest way is to recreate the aggregation logic here
-        # with the actual watermark_gt
-        
-        # For now, let's use monkey patching on the module level
-        import aggregation as agg_module
-        original_watermark_gt = getattr(agg_module, '_watermark_gt', None)
-        agg_module._watermark_gt = watermark_gt
-        
-        try:
-            # Call original function - but it won't use our watermark_gt
-            # So we need to recreate the logic
-            result = _call_with_watermark_gt(original_func, decode, watermark_gt)
-        finally:
-            if original_watermark_gt is not None:
-                agg_module._watermark_gt = original_watermark_gt
-            elif hasattr(agg_module, '_watermark_gt'):
-                delattr(agg_module, '_watermark_gt')
-        
-        return result
-    
-    return wrapped_func
+# Import common aggregation utilities
+from .aggregation_utils import (
+    call_with_watermark_gt_tensor,
+    call_with_watermark_gt_numpy,
+    BIT_ACCURACY_THRESHOLD,
+    RANDOM_DETECTION_PROBABILITY,
+    DETECTION_THRESHOLD_P_VALUE,
+)
 
 
 def _call_with_watermark_gt_tensor(func, decode: torch.Tensor, watermark_gt: torch.Tensor) -> bool:
     """
     GPU-optimized version of aggregation function using PyTorch tensors.
+    
+    Wrapper around common aggregation_utils for backward compatibility.
     
     Args:
         func: Aggregation function (for name lookup)
@@ -304,172 +268,24 @@ def _call_with_watermark_gt_tensor(func, decode: torch.Tensor, watermark_gt: tor
     Returns:
         Boolean indicating if watermark is detected
     """
-    from scipy.optimize import minimize
-    from scipy.stats import binom
-    
-    func_name = func.__name__
-    
-    # Ensure both tensors are on the same device
-    device = decode.device
-    watermark_gt = watermark_gt.to(device)
-    
-    # Convert logits to bits: positive -> 1, negative/zero -> 0
-    # VideoSeal convention: logits > 0 -> bit 1, logits <= 0 -> bit 0
-    predicted_bits = (decode > 0).long()  # 1 for positive, 0 for negative/zero
-    
-    if func_name == 'logit_mean':
-        decoded = torch.mean(decode, dim=0)
-        predicted = (decoded > 0).long()
-        bitacc = torch.sum((watermark_gt == predicted).float()) / len(watermark_gt)
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'logit_g_median':
-        # This requires scipy optimization, so convert to CPU for this step
-        decode_np = decode.detach().cpu().numpy()
-        watermark_gt_np = watermark_gt.detach().cpu().numpy()
-        
-        def objective(median):
-            return np.sum(np.linalg.norm(decode_np - median, axis=1))
-        initial_guess = np.mean(decode_np, axis=0)
-        decoded = minimize(objective, initial_guess, method='Powell', tol=1e-5)
-        predicted = (decoded.x > 0).astype(int)
-        bitacc = np.sum((watermark_gt_np == predicted)) / len(watermark_gt_np)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bit_majority':
-        # Majority vote across frames
-        decoded = (torch.sum(predicted_bits, dim=0) > (decode.shape[0] / 2)).long()
-        bitacc = torch.sum((watermark_gt == decoded).float()) / len(watermark_gt)
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'bit_g_median':
-        decoded = torch.median(predicted_bits.float(), dim=0)[0].long()
-        bitacc = torch.sum((watermark_gt == decoded).float()) / len(watermark_gt)
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'bitacc_mean':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float())
-        return (bitacc >= 67/96).item()
-    
-    elif func_name == 'bitacc_median':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
-        median_bitacc = torch.median(bitacc)
-        return (median_bitacc >= 67/96).item()
-    
-    elif func_name == 'detection_threshold':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
-        detected_frames = torch.sum((bitacc >= 67/96).long()).item()
-        
-        n = decode.shape[0]
-        p = 0.0000661
-        threshold = 10e-4
-        k = n  # Default if no threshold found
-        for i in range(n + 1):
-            if binom.sf(i - 1, n, p) <= threshold:
-                k = i
-                break
-        
-        return detected_frames >= k
-    
-    elif func_name == 'detection_majority':
-        watermark_gt_tiled = watermark_gt.unsqueeze(0).expand(decode.shape[0], -1)
-        bitacc = torch.mean((watermark_gt_tiled == predicted_bits).float(), dim=1)
-        detected_frames = torch.sum((bitacc >= 67/96).long()).item()
-        return detected_frames > (decode.shape[0] // 2)
-    
-    else:
-        # Fallback: convert to numpy and use original function
-        decode_np = decode.detach().cpu().numpy()
-        watermark_gt_np = watermark_gt.detach().cpu().numpy()
-        return _call_with_watermark_gt(func, decode_np, watermark_gt_np)
+    return call_with_watermark_gt_tensor(func, decode, watermark_gt)
 
 
 def _call_with_watermark_gt(func, decode: np.ndarray, watermark_gt: np.ndarray) -> bool:
     """
     Call aggregation function with custom watermark_gt (CPU/numpy version for fallback).
     
-    Reimplements the aggregation logic from aggregation.py but uses actual watermark_gt.
+    Wrapper around common aggregation_utils for backward compatibility.
     
-    Note: VideoSeal uses logits where:
-    - logits > 0 -> bit 0
-    - logits < 0 -> bit 1
-    So we convert logits to bits: (decode >= 0).astype(int) gives 0 for positive, 1 for negative
-    But watermark_gt is already in {0, 1} format, so we need to compare correctly.
+    Args:
+        func: Aggregation function (for name lookup)
+        decode: Logits numpy array of shape (T, K)
+        watermark_gt: Ground truth watermark numpy array of shape (K,)
+        
+    Returns:
+        Boolean indicating if watermark is detected
     """
-    from scipy.optimize import minimize
-    from scipy.stats import binom
-    
-    func_name = func.__name__
-    
-    # Convert logits to bits: positive -> 1, negative/zero -> 0
-    # VideoSeal convention: logits > 0 -> bit 1, logits <= 0 -> bit 0
-    predicted_bits = (decode > 0).astype(int)  # 1 for positive, 0 for negative/zero
-    
-    if func_name == 'logit_mean':
-        decoded = np.mean(decode, axis=0)
-        predicted = (decoded > 0).astype(int)  # 1 for positive, 0 for negative/zero
-        bitacc = np.sum((watermark_gt == predicted)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'logit_g_median':
-        def objective(median):
-            return np.sum(np.linalg.norm(decode - median, axis=1))
-        initial_guess = np.mean(decode, axis=0)
-        decoded = minimize(objective, initial_guess, method='Powell', tol=1e-5)
-        predicted = (decoded.x > 0).astype(int)  # 1 for positive, 0 for negative/zero
-        bitacc = np.sum((watermark_gt == predicted)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bit_majority':
-        # Majority vote across frames
-        decoded = (np.sum(predicted_bits, axis=0) > (len(decode) / 2)).astype(int)
-        bitacc = np.sum((watermark_gt == decoded)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bit_g_median':
-        decoded = np.median(predicted_bits, axis=0).astype(int)
-        bitacc = np.sum((watermark_gt == decoded)) / len(watermark_gt)
-        return bitacc >= 67/96
-    
-    elif func_name == 'bitacc_mean':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits))
-        return bitacc >= 67/96
-    
-    elif func_name == 'bitacc_median':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits), axis=1)
-        median_bitacc = np.median(bitacc)
-        return median_bitacc >= 67/96
-    
-    elif func_name == 'detection_threshold':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits), axis=1)
-        detected_frames = np.sum(bitacc >= 67/96)
-        
-        n = decode.shape[0]
-        p = 0.0000661
-        threshold = 10e-4
-        k = n  # Default if no threshold found
-        for i in range(n + 1):
-            if binom.sf(i - 1, n, p) <= threshold:
-                k = i
-                break
-        
-        return detected_frames >= k
-    
-    elif func_name == 'detection_majority':
-        watermark_gt_tiled = np.tile(watermark_gt, (decode.shape[0], 1))
-        bitacc = np.mean((watermark_gt_tiled == predicted_bits), axis=1)
-        detected_frames = np.sum(bitacc >= 67 / 96)
-        return detected_frames > (decode.shape[0] // 2)
-    
-    else:
-        # Fallback to original function
-        return func(decode)
+    return call_with_watermark_gt_numpy(func, decode, watermark_gt)
 
 
 # Aggregation strategies - will be wrapped with actual watermark_gt at runtime
@@ -790,14 +606,13 @@ def evaluate_common_perturbations(
                 logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
 
 
-def _apply_jpeg_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
+def _apply_jpeg_albumentations(pert: torch.nn.Module, video: torch.Tensor) -> torch.Tensor:
     """
     Apply JPEG perturbation using albumentations video augmentation.
     
     Args:
         pert: JPEG perturbation module
         video: Video tensor of shape (T, C, H, W)
-        T, C, H, W: Video dimensions
         
     Returns:
         Perturbed video tensor
@@ -811,14 +626,13 @@ def _apply_jpeg_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: in
     return _apply_albumentations_transform(video, transform)
 
 
-def _apply_gaussianblur_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
+def _apply_gaussianblur_albumentations(pert: torch.nn.Module, video: torch.Tensor) -> torch.Tensor:
     """
     Apply Gaussian blur using albumentations video augmentation.
     
     Args:
         pert: GaussianBlur perturbation module
         video: Video tensor of shape (T, C, H, W)
-        T, C, H, W: Video dimensions
         
     Returns:
         Perturbed video tensor
@@ -836,19 +650,19 @@ def _apply_gaussianblur_albumentations(pert: torch.nn.Module, video: torch.Tenso
     return _apply_albumentations_transform(video, transform)
 
 
-def _apply_crop_albumentations(pert: torch.nn.Module, video: torch.Tensor, T: int, C: int, H: int, W: int) -> torch.Tensor:
+def _apply_crop_albumentations(pert: torch.nn.Module, video: torch.Tensor) -> torch.Tensor:
     """
     Apply Crop using albumentations video augmentation.
     
     Args:
         pert: Crop perturbation module
         video: Video tensor of shape (T, C, H, W)
-        T, C, H, W: Video dimensions
         
     Returns:
         Perturbed video tensor
     """
     crop_ratio = pert.crop_ratio
+    _, _, H, W = video.shape
     crop_height = int(H * crop_ratio)
     crop_width = int(W * crop_ratio)
     
@@ -941,13 +755,13 @@ def _apply_perturbation(pert: torch.nn.Module, video: torch.Tensor, pert_name: s
     
     # Albumentations-based perturbations (required)
     if pert_name == "JPEG":
-        return _apply_jpeg_albumentations(pert, video, T, C, H, W)
+        return _apply_jpeg_albumentations(pert, video)
     
     elif pert_name == "GaussianBlur":
-        return _apply_gaussianblur_albumentations(pert, video, T, C, H, W)
+        return _apply_gaussianblur_albumentations(pert, video)
     
     elif pert_name == "Crop":
-        return _apply_crop_albumentations(pert, video, T, C, H, W)
+        return _apply_crop_albumentations(pert, video)
     
     # Gaussian: Use original implementation (albumentations has precision loss and different clamp behavior)
     elif pert_name == "Gaussian":
