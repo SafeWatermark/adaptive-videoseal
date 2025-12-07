@@ -1,16 +1,30 @@
-from src.utils import get_videoseal
-from src.adaptive_models.adaptive_videoseal import AdaptiveVideoseal
-import torch.nn as nn
 import torch
+from videoseal.models.videoseal import Videoseal
+import pytest
+from models.embedder import StegaStampEmbedder
+from models.extractor import StegaStampExtractor
+from models.stega_stamp import (
+    STEGA_STAMP_ATTENUATION,
+    STEGA_STAMP_IMAGE_WIDTH,
+    STEGA_STAMP_SCALING_I,
+    STEGA_STAMP_SCALING_W,
+)
+import logging
 
 
-def test_get_videoseal():
+@pytest.mark.parametrize(
+    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+)
+def test_get_videoseal(request, model_name: str):
     """Test that the videoseal model loads and can perform a basic embed pass."""
     F, C, H, W = 2, 3, 224, 224
 
     # Load model
-    model = get_videoseal()
-    assert isinstance(model, nn.Module), "get_videoseal() did not return an nn.Module"
+    # convert the model_name(str) into the actual fixture by calling
+    model = request.getfixturevalue(model_name)
+    assert isinstance(
+        model, Videoseal
+    ), f"getter({model_name}) did not return an Videoseal, got {type(model).__name__}"
 
     # Prepare dummy image batch
     imgs = torch.randn(F, C, H, W).clamp_(0.0, 1.0)
@@ -30,7 +44,10 @@ def test_get_videoseal():
     assert isinstance(outputs, dict), f"Expected dict output, got {type(outputs)}"
 
 
-def test_from_videoseal():
+@pytest.mark.parametrize(
+    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+)
+def test_from_videoseal(request, model_name: str, make_adaptive_videoseal):
     """
     Test that AdaptiveVideoseal.from_videoseal(model) correctly clones all weights
     and internal buffers from the original Videoseal model.
@@ -44,15 +61,19 @@ def test_from_videoseal():
     AdaptiveVideoseal via `from_videoseal()` preserves *all* learned parameters
     exactly, making AdaptiveVideoseal a drop-in replacement.
     """
-    model = get_videoseal()
-    adaptive = AdaptiveVideoseal.from_videoseal(model)
+    # convert the model_name(str) into the actual fixture by calling
+    model = request.getfixturevalue(model_name)
+    adaptive = make_adaptive_videoseal(model)
+
     # Detect extra keys
     extra_keys = set(model.state_dict()) - set(adaptive.state_dict())
     if extra_keys:
-        print(f"[WARNING] Keys in parent model but not in adaptive model: {extra_keys}")
+        logging.warning(
+            f"[WARNING] Keys in parent model but not in adaptive model: {extra_keys}"
+        )
     missing_keys = set(adaptive.state_dict()) - set(model.state_dict())
     if missing_keys:
-        print(f"[WARNING] Extra keys in adaptive model: {missing_keys}")
+        logging.warning(f"[WARNING] Extra keys in adaptive model: {missing_keys}")
 
     # Compare tensors
     for k, v in model.state_dict().items():
@@ -71,7 +92,12 @@ def test_from_videoseal():
             )
 
 
-def test_adaptive_videoseal_embed_matches_parent():
+@pytest.mark.parametrize(
+    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+)
+def test_adaptive_videoseal_embed_matches_parent(
+    request, model_name: str, make_adaptive_videoseal
+):
     """
     Ensure that AdaptiveVideoseal produces the same watermarking output as the
     original Videoseal model when no adaptive logic is applied.
@@ -85,8 +111,9 @@ def test_adaptive_videoseal_embed_matches_parent():
     """
 
     # Load parent & converted model
-    model = get_videoseal()
-    adaptive = AdaptiveVideoseal.from_videoseal(model)
+    # convert the model_name(str) into the actual fixture by calling
+    model = request.getfixturevalue(model_name)
+    adaptive = make_adaptive_videoseal(model)
 
     # Prepare random image + message(intentionally F = 1 to deactivate scene detection)
     F, C, H, W = 1, 3, 224, 224
@@ -126,7 +153,12 @@ def test_adaptive_videoseal_embed_matches_parent():
     )
 
 
-def test_adaptive_videoseal_detached_from_parent():
+@pytest.mark.parametrize(
+    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+)
+def test_adaptive_videoseal_detached_from_parent(
+    request, model_name: str, make_adaptive_videoseal
+):
     """
     AdaptiveVideoseal should behave independently from its parent Videoseal
     when their attributes are modified separately.
@@ -138,11 +170,16 @@ def test_adaptive_videoseal_detached_from_parent():
       • However, the *embedded message (msgs)* should remain identical,
         because the same message is passed as input and message generation
         is independent of the watermarked-image differences.
+
+    Notes:
+        - Test-only modification(Stega Stamp):
+        We intentionally change scaling_w/scaling_i here to validate behavior.
+        In real models, BOTH must remain 1.0 to avoid degrading StegaStamp decoding.
     """
 
-    # Load parent & converted model
-    model = get_videoseal()
-    adaptive = AdaptiveVideoseal.from_videoseal(model)
+    # convert the model_name(str) into the actual fixture by calling
+    model = request.getfixturevalue(model_name)
+    adaptive = make_adaptive_videoseal(model)
 
     # Modify attributes independently
     model.blender.scaling_w = 0.4
@@ -194,4 +231,50 @@ def test_adaptive_videoseal_detached_from_parent():
         "[ERROR] Embedded messages (msgs) do not match.\n"
         "Expected: Same message since the input message is identical.\n"
         f"  • Max diff: {diff_m.max().item()}\n"
+    )
+
+
+#### --- stega stamp specific ---
+
+
+def test_attributes_get_stega_stamp_videoseal(stega_stamp_videoseal_model):
+    """Test that the videoseal model loads and can perform a basic embed pass."""
+    model = stega_stamp_videoseal_model
+
+    assert isinstance(model, Videoseal), (
+        f"get_videoseal() returned a {type(model).__name__}, "
+        f"but an instance of Videoseal was expected."
+    )
+
+    assert isinstance(model.embedder, StegaStampEmbedder), (
+        "Invalid embedder: expected StegaStampEmbedder, "
+        f"but got {model.embedder.__class__.__name__}. "
+        "This usually means the wrong class was imported or reloaded."
+    )
+
+    assert isinstance(model.detector, StegaStampExtractor), (
+        "Invalid detector: expected StegaStampExtractor, "
+        f"but got {model.detector.__class__.__name__}."
+    )
+
+    assert model.img_size == STEGA_STAMP_IMAGE_WIDTH, (
+        "Unexpected image size: "
+        f"expected {STEGA_STAMP_IMAGE_WIDTH}, got {model.img_size}."
+    )
+
+    assert model.attenuation == STEGA_STAMP_ATTENUATION, (
+        "Unexpected attenuation value: "
+        f"expected {STEGA_STAMP_ATTENUATION}, got {model.attenuation}."
+    )
+
+    assert model.blender.scaling_i == STEGA_STAMP_SCALING_I, (
+        "Invalid blender.scaling_i: "
+        f"expected {STEGA_STAMP_SCALING_I}, got {model.blender.scaling_i}. "
+        "Note: scaling_i must remain 1.0 in real usage."
+    )
+
+    assert model.blender.scaling_w == STEGA_STAMP_SCALING_W, (
+        "Invalid blender.scaling_w: "
+        f"expected {STEGA_STAMP_SCALING_W}, got {model.blender.scaling_w}. "
+        "Detection accuracy drops if scaling_w < scaling_i."
     )
