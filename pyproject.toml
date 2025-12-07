@@ -44,6 +44,7 @@ where = ["src/videoseal"]
 dev = [
     "coverage>=7.11.2",
     "pytest>=8.4.2",
+    "ruff>=0.14.8",
 ]
 
 [tool.pytest.ini_options]
@@ -60,5 +61,6 @@ omit = [
 [tool.ruff]
 exclude = [
     "src/videoseal",
+    "src/videomarkbench",
     "src/notebooks",
 ]

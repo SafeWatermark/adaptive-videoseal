@@ -5,19 +5,17 @@ Loads videos from the VideoMarkBench dataset structure.
 """
 
 import torch
-import numpy as np
 from pathlib import Path
 from typing import List, Dict, Iterator, Tuple, Optional
-import os
 import logging
 
 # Try to use decord for faster video loading, fallback to cv2 if not available
 try:
     from decord import VideoReader, cpu
+
     decord_available = True
 except ImportError:
     decord_available = False
-    import cv2
 
 
 class VideoMarkBenchDataset:
@@ -59,18 +57,20 @@ class VideoMarkBenchDataset:
     def __len__(self) -> int:
         """Return number of videos in dataset."""
         return len(self.video_files)
-    
+
     def get_video_files(self) -> List[Path]:
         """Get list of video file paths."""
         return self.video_files.copy()
-    
-    def get_selected_videos(self, selected_files: List[Path]) -> Iterator[Tuple[torch.Tensor, Dict]]:
+
+    def get_selected_videos(
+        self, selected_files: List[Path]
+    ) -> Iterator[Tuple[torch.Tensor, Dict]]:
         """
         Iterate over selected video files only.
-        
+
         Args:
             selected_files: List of video file paths to iterate over
-            
+
         Yields:
             Tuple of (video_tensor, video_info_dict)
         """
@@ -115,56 +115,62 @@ class VideoMarkBenchDataset:
             return self._load_video_decord(video_path)
         else:
             return self._load_video_cv2(video_path)
-    
+
     def _load_video_decord(self, video_path: Path) -> torch.Tensor:
         """
         Load video using decord (faster, batch loading).
-        
+
         Args:
             video_path: Path to video file
-            
+
         Returns:
             Video tensor of shape (T, C, H, W) in [0, 1]
         """
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video_path}")
-        
+
         try:
             # Load video with decord (supports batch loading)
             # Note: 512x512 is the standard resolution for VideoMarkBench dataset.
             # VideoSeal model processes at 256x256 internally, but input videos are loaded at 512x512.
-            vr = VideoReader(str(video_path), width=512, height=512, num_threads=4, ctx=cpu(0))
-            
+            vr = VideoReader(
+                str(video_path), width=512, height=512, num_threads=4, ctx=cpu(0)
+            )
+
             # Get all frames at once (much faster than frame-by-frame)
             num_frames = len(vr)
             if num_frames == 0:
                 raise ValueError(f"No frames loaded from {video_path}")
-            
+
             # Get batch of all frames: shape (T, H, W, C) in RGB
             vid_np = vr.get_batch(range(num_frames)).asnumpy()  # (T, H, W, C)
-            
+
             # Convert to tensor: (T, H, W, C) -> (T, C, H, W) and normalize
             vid_tensor = torch.from_numpy(vid_np).float()
-            vid_tensor = vid_tensor.permute(0, 3, 1, 2) / 255.0  # (T, C, H, W) in [0, 1]
-            
+            vid_tensor = (
+                vid_tensor.permute(0, 3, 1, 2) / 255.0
+            )  # (T, C, H, W) in [0, 1]
+
             return vid_tensor
-            
+
         except Exception as e:
-            self.logger.warning(f"Error loading video with decord: {e}, falling back to cv2")
+            self.logger.warning(
+                f"Error loading video with decord: {e}, falling back to cv2"
+            )
             return self._load_video_cv2(video_path)
-    
+
     def _load_video_cv2(self, video_path: Path) -> torch.Tensor:
         """
         Load video using cv2 (fallback method).
-        
+
         Args:
             video_path: Path to video file
-            
+
         Returns:
             Video tensor of shape (T, C, H, W) in [0, 1]
         """
         import cv2
-        
+
         cap = cv2.VideoCapture(str(video_path))
         frames = []
 
@@ -227,4 +233,3 @@ class VideoMarkBenchDataset:
             pass
 
         return info
-

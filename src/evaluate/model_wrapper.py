@@ -15,9 +15,6 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 sys.path.insert(0, str(parent_dir / "videoseal"))
 
-from adaptive_models.adaptive_videoseal import AdaptiveVideoseal  # noqa: E402
-from videoseal.models import Videoseal  # noqa: E402
-
 
 class VideoMarkBenchModel:
     """
@@ -120,7 +117,9 @@ class VideoMarkBenchModel:
 
         return logits
 
-    def detect(self, video: torch.Tensor, is_video: bool = True, requires_grad: bool = False) -> Dict:
+    def detect(
+        self, video: torch.Tensor, is_video: bool = True, requires_grad: bool = False
+    ) -> Dict:
         """
         Detect watermark in video (for compatibility with original VideoMarkBench).
 
@@ -155,7 +154,7 @@ class VideoMarkBenchModel:
         if requires_grad:
             # For gradient computation, call detector directly to bypass @torch.no_grad()
             # This is only safe for single frames (is_video=False) used in whitebox attacks
-            if not is_video and hasattr(self.model, 'detector'):
+            if not is_video and hasattr(self.model, "detector"):
                 # Single frame case: call detector directly
                 preds = self.model.detector(video)  # (1, K+1)
             else:
@@ -167,7 +166,8 @@ class VideoMarkBenchModel:
             # No gradient needed, use detect() method normally
             with torch.no_grad():
                 outputs = self.model.detect(video, is_video=is_video)
-                preds = outputs["preds"]  # (T, K+1) where first column is actual detection bit
+                preds = outputs[
+                    "preds"
+                ]  # (T, K+1) where first column is actual detection bit
 
         return {"preds": preds}
-
