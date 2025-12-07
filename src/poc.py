@@ -248,7 +248,10 @@ def run_experiment(args):
     elif args.model == "stega_stamp":
         if args.onnx_path is None:
             raise ValueError(
-                "StegaStamp requires an ONNX file. Please provide --onnx_path <path>."
+                "StegaStamp requires an ONNX model file.\n"
+                "Please provide it using: --onnx_path <path>.\n"
+                "You can download the file from this repository's GitHub Releases "
+                "(original source: https://github.com/umd-huang-lab/WAVES/tree/main/decoders)."
             )
 
         model = get_stega_stamp_videoseal(args.onnx_path)

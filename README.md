@@ -55,7 +55,7 @@ bash scripts/format.sh
 AdaptiveVideoSeal detects scene changes to optimize keyframe selection and watermark propagation.
 During experiments, you can choose a detection method using the `--scene_detector` option.
 
-**Detector Types**
+#### **Detector Types**
 
 | Detector      | Description                                                                                                                                                                                               |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -63,6 +63,18 @@ During experiments, you can choose a detection method using the `--scene_detecto
 | **histogram** | Detects scene changes by comparing differences in Y-channel histogram distributions between frames.                                                                                                       |
 | **hash**      | Uses perceptual image hashes to measure frame similarity—fast and effective for detecting abrupt scene changes.                                                                                           |
 | **lpips** | Detects scene changes based on the perceptual difference between consecutive frames using the deep-learning–based LPIPS metric. |
+---
+
+#### **Model Types**
+
+The **Adaptive VideoSeal** project supports not only the **VideoSeal** model but also the **StegaStamp** model.
+
+| Model          | Details                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **VideoSeal**  | The default model. It applies the Adaptive Pipeline based on Meta’s official VideoSeal 1.0 weights.                          |
+| **StegaStamp** | Requires a separate ONNX model file (`stega_stamp.onnx`). <br> (For detailed setup, see **3.3 Using the StegaStamp Model**.) |
+| **REVMark**    | Coming soon. It will be integrated in a future update.                                                                       |
+---
 
 ### 3.2 Adaptive Watermarking Experiment
 
@@ -88,7 +100,32 @@ bash scripts/poc/videoseal/run_lpips_detector.sh        # Run experiment using t
 * `outputs/adaptive_1.mp4` → Adaptive watermarking result
 * `outputs/*.txt` → Reproducible payload bit data
 
-### 3.3 SA-V Validation Image-to-Video Conversion
+### 3.3 Using the StegaStamp Model
+
+To run inference with the StegaStamp model, the **`stega_stamp.onnx`** file is required.
+
+* **Where to download:**
+
+  * The file can be downloaded from this repository’s **GitHub Releases** section.
+
+    * Original source: [WAVES repository](https://github.com/umd-huang-lab/WAVES/tree/main/decoders)
+
+* **File placement:**
+
+  * After downloading, place the `stega_stamp.onnx` file at the following path relative to the project root:
+    `onnx/stega_stamp.onnx`
+
+Once the file is prepared, you can run watermarking experiments using the `StegaStamp` model within the Adaptive VideoSeal environment.
+
+#### Execution Scripts
+
+```bash
+bash scripts/poc/stega_stamp/run_content_detector.sh     # Run experiment using the content detector
+bash scripts/poc/stega_stamp/run_histogram_detector.sh   # Run experiment using the histogram detector
+...
+```
+
+### 3.4 SA-V Validation Image-to-Video Conversion
 
 The SA-V validation dataset provides each sample as a **directory of JPEG frames**.
 To evaluate Adaptive VideoSeal on this dataset, you must first convert each frame
@@ -102,7 +139,7 @@ uv run scripts/sav_val_image2video.py --data_path <path_to_JPEGImages directory>
 
 This will generate an `.mp4` file for each directory of frames.
 
-### 3.4 Scene-Detector Threshold Experiments
+### 3.5 Scene-Detector Threshold Experiments
 
 * Use `src/threshold_experiment.py` to sweep scene-detector thresholds and watermark step sizes.
 
