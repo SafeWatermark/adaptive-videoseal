@@ -3,7 +3,9 @@ EXPERIMENT_SCRIPT="src/poc.py"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 python "$EXPERIMENT_SCRIPT" \
-  --scene_detector content \
+  --scene_detector lpips \
+  --model stega_stamp \
+  --onnx_path onnx/stega_stamp.onnx \
   --device auto \
   --seed 42 \
   --input_dir ./data \
@@ -13,5 +15,5 @@ python "$EXPERIMENT_SCRIPT" \
   --num_frames_for_extraction 32 \
   --chunk_size 16 \
   --step_size 8 \
-  --scaling_w 1.5 \
+  --scaling_w 1.0 \
   --video_mode "repeat"

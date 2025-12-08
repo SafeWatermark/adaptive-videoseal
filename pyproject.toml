@@ -32,6 +32,8 @@ dependencies = [
     "tqdm>=4.67.1",
     "transformers>=4.57.1",
     "albumentations>=2.0.8",
+    "onnxruntime>=1.23.2",
+    "onnx2torch>=1.5.15",
 ]
 
 
