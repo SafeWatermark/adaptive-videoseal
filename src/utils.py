@@ -8,13 +8,19 @@ import logging
 import sys
 from videoseal.utils.cfg import setup_model_from_model_card
 from contextlib import contextmanager
-from models.embedder import StegaStampEmbedder
-from models.extractor import StegaStampExtractor
+from models.embedder import StegaStampEmbedder, REVMarkEmbedder
+from models.extractor import StegaStampExtractor, REVMarkExtractor
 from models.stega_stamp import (
     STEGA_STAMP_IMAGE_WIDTH,
     STEGA_STAMP_ATTENUATION,
     STEGA_STAMP_SCALING_W,
     STEGA_STAMP_SCALING_I,
+)
+from models.revmark import (
+    REVMARK_DEFAULT_WIDTH,
+    REVMARK_ATTENUATION,
+    REVMARK_SCALING_I,
+    REVMARK_SCALING_W,
 )
 from videoseal.models import Videoseal
 
@@ -145,4 +151,33 @@ def get_stega_stamp_videoseal(onnx_path: str) -> Videoseal:
     model.attenuation = STEGA_STAMP_ATTENUATION
     model.blender.scaling_i = STEGA_STAMP_SCALING_I
     model.blender.scaling_w = STEGA_STAMP_SCALING_W
+    return model
+
+
+def get_revmark_videoseal(encoder_path: str, decoder_path: str) -> Videoseal:
+    """
+    Configure a VideoSeal model to use REVMark for watermark embedding and extraction.
+
+    Key behavior and requirements:
+    - REVMark operates on 8-frame blocks at 128x128 resolution.
+    - REVMark expects pixel values in [-1, 1], so scaling_w=0.5 is used
+      to convert the residual to [0, 1] domain.
+    - REVMark does not use attenuation (JND masking).
+    - The extractor aggregates decoded messages by averaging across 8-frame chunks.
+
+    Args:
+        encoder_path: Path to the REVMark encoder checkpoint (Encoder.pth).
+        decoder_path: Path to the REVMark decoder checkpoint (Decoder.pth).
+
+    Returns:
+        VideoSeal model configured for REVMark embedding and extraction.
+    """
+    model = get_videoseal()
+    model.embedder = REVMarkEmbedder(encoder_path)
+    model.detector = REVMarkExtractor(decoder_path)
+
+    model.img_size = REVMARK_DEFAULT_WIDTH
+    model.attenuation = REVMARK_ATTENUATION
+    model.blender.scaling_i = REVMARK_SCALING_I
+    model.blender.scaling_w = REVMARK_SCALING_W
     return model

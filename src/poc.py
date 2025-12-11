@@ -22,6 +22,7 @@ from utils import (
     select_device,
     get_videoseal,
     get_stega_stamp_videoseal,
+    get_revmark_videoseal,
 )
 from scene_detectors.registry import detector_registry
 import pandas as pd
@@ -264,6 +265,14 @@ def run_experiment(args):
             "VideoSeal 1.0 enables attenuation by default, but StegaStamp requires it to be disabled. "
             "Attenuation has been set to None."
         )
+    elif args.model == "revmark":
+        import os
+        from REVMark import revmark_path
+
+        model = get_revmark_videoseal(
+            os.path.join(revmark_path, "checkpoints/Encoder.pth"),
+            os.path.join(revmark_path, "checkpoints/Decoder.pth"),
+        )
 
     model = model.eval().to(device)
     model.compile()
@@ -327,10 +336,19 @@ def run_experiment(args):
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
 
-        adaptive_bit_acc = (
-            bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
-        )
-        bit_acc = bit_accuracy(soft_msgs, msgs_ori).item() * 100
+        if args.model == "revmark":
+            adaptive_bit_acc = (
+                bit_accuracy(
+                    adaptive_soft_msgs, adaptive_msgs_ori, threshold=0.5
+                ).item()
+                * 100
+            )
+            bit_acc = bit_accuracy(soft_msgs, msgs_ori, threshold=0.5).item() * 100
+        else:
+            adaptive_bit_acc = (
+                bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
+            )
+            bit_acc = bit_accuracy(soft_msgs, msgs_ori).item() * 100
 
         logger.info(
             f"bit_acc = {bit_acc:.2f}%, adaptive_bit_acc = {adaptive_bit_acc:.2f}%"
@@ -409,7 +427,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="videoseal",
-        choices=["videoseal", "stega_stamp"],
+        choices=["videoseal", "stega_stamp", "revmark"],
         help="Watermarking model to use ('videoseal' or 'stega_stamp').",
     )
     parser.add_argument(
