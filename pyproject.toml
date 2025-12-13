@@ -64,4 +64,6 @@ exclude = [
     "src/videomarkbench",
     "src/notebooks",
 ]
+
+[tool.ruff.lint]
 ignore = ["E402"]  # Module level import not at top of file (needed for sys.path manipulation)
