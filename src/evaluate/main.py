@@ -25,8 +25,12 @@ from adaptive_models.adaptive_videoseal import AdaptiveVideoseal  # noqa: E402
 
 from evaluate.model_wrapper import VideoMarkBenchModel  # noqa: E402
 from evaluate.dataset_loader import VideoMarkBenchDataset  # noqa: E402
-from evaluate.common_evaluator import evaluate_common_perturbations  # noqa: E402
+from evaluate.common_evaluator import (  # noqa: E402
+    evaluate_common_perturbations,
+    evaluate_with_preapplied_perturbations,
+)
 from evaluate.whitebox_evaluator import evaluate_whitebox_attacks  # noqa: E402
+from evaluate.perturbed_dataset import PerturbedVideoDataset  # noqa: E402
 
 
 def setup_model(
@@ -141,6 +145,19 @@ def main():
         type=str,
         default=None,
         help="Path to Kinetics dataset directory for forgery attacks (default: None, uses same dataset)",
+    )
+    parser.add_argument(
+        "--preapplied_perturbations_dir",
+        type=str,
+        default=None,
+        help="Path to pre-applied perturbations directory (for faster evaluation). "
+        "If specified, uses pre-perturbed videos instead of applying on-the-fly.",
+    )
+    parser.add_argument(
+        "--preapplied_forgery_dir",
+        type=str,
+        default=None,
+        help="Path to pre-applied perturbations for forgery attack (unwatermarked videos).",
     )
     parser.add_argument(
         "--max_videos",
@@ -336,15 +353,67 @@ def main():
         logger.info("Evaluating Common Perturbations")
         logger.info("=" * 50)
         try:
-            common_results = evaluate_common_perturbations(
-                model=model,
-                dataset=selected_dataset,
-                output_dir=output_dir,
-                logger=logger,
-                max_frames_per_video=args.max_frames_per_video,
-                evaluate_forgery=True,
-                kinetics_dataset=kinetics_dataset,
-            )
+            # Check if using pre-applied perturbations for faster evaluation
+            if args.preapplied_perturbations_dir:
+                preapplied_dir = Path(args.preapplied_perturbations_dir)
+                if not preapplied_dir.exists():
+                    raise FileNotFoundError(
+                        f"Pre-applied perturbations directory not found: {preapplied_dir}"
+                    )
+
+                logger.info(f"Using pre-applied perturbations from: {preapplied_dir}")
+                perturbed_dataset = PerturbedVideoDataset(
+                    preapplied_dir, logger=logger, device=device
+                )
+
+                # Load forgery perturbations if specified
+                perturbed_forgery_dataset = None
+                if args.preapplied_forgery_dir:
+                    forgery_dir = Path(args.preapplied_forgery_dir)
+                    if forgery_dir.exists():
+                        logger.info(
+                            f"Using pre-applied forgery perturbations from: {forgery_dir}"
+                        )
+                        perturbed_forgery_dataset = PerturbedVideoDataset(
+                            forgery_dir, logger=logger, device=device
+                        )
+                    else:
+                        logger.warning(
+                            f"Pre-applied forgery directory not found: {forgery_dir}"
+                        )
+
+                # When using pre-applied perturbations, use ALL original videos
+                # (the evaluator will filter to only those in perturbed dataset)
+                # This ignores --max_videos when using pre-applied perturbations
+                # since the perturbed dataset already defines which videos to use
+                original_dataset_iter = dataset
+                logger.info(
+                    "Note: --max_videos is ignored when using pre-applied perturbations. "
+                    f"Using {len(perturbed_dataset)} videos from perturbed dataset."
+                )
+
+                common_results = evaluate_with_preapplied_perturbations(
+                    model=model,
+                    perturbed_dataset=perturbed_dataset,
+                    original_dataset=original_dataset_iter,
+                    output_dir=output_dir,
+                    logger=logger,
+                    max_frames_per_video=args.max_frames_per_video,
+                    evaluate_forgery=True,
+                    perturbed_forgery_dataset=perturbed_forgery_dataset,
+                )
+            else:
+                # Use on-the-fly perturbation (original behavior)
+                common_results = evaluate_common_perturbations(
+                    model=model,
+                    dataset=selected_dataset,
+                    output_dir=output_dir,
+                    logger=logger,
+                    max_frames_per_video=args.max_frames_per_video,
+                    evaluate_forgery=True,
+                    kinetics_dataset=kinetics_dataset,
+                )
+
             # Load statistics if available
             stats_file = output_dir / "common_perturbations_stats.json"
             stats = {}

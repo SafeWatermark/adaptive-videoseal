@@ -36,14 +36,14 @@ def test_patch_ffmpeg_decorator(monkeypatch):
 
     dummy_function()
 
-    assert (
-        calls[0][0] == real_ffmpeg
-    ), f"Expected real ffmpeg '{real_ffmpeg}', but got '{calls[0][0]}'"
+    assert calls[0][0] == real_ffmpeg, (
+        f"Expected real ffmpeg '{real_ffmpeg}', but got '{calls[0][0]}'"
+    )
 
     # Assert all other arguments remain the same
-    assert (
-        calls[0][1:] == subprocess_args
-    ), f"Unexpected args: {calls[0][1:]}, expected {subprocess_args}"
+    assert calls[0][1:] == subprocess_args, (
+        f"Unexpected args: {calls[0][1:]}, expected {subprocess_args}"
+    )
 
 
 def test_patch_ffmpeg_decorator_restores_run_after_call():

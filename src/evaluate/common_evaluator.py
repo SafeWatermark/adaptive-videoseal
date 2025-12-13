@@ -867,3 +867,289 @@ def _get_perturbation_params(pert: torch.nn.Module) -> Dict:
         if hasattr(pert, attr):
             params[attr] = getattr(pert, attr)
     return params
+
+
+def evaluate_with_preapplied_perturbations(
+    model,
+    perturbed_dataset,
+    original_dataset: Iterator[Tuple[torch.Tensor, Dict]],
+    output_dir: Path,
+    logger: Optional[logging.Logger] = None,
+    max_frames_per_video: Optional[int] = None,
+    evaluate_forgery: bool = True,
+    perturbed_forgery_dataset=None,
+) -> pd.DataFrame:
+    """
+    Evaluate model using pre-applied perturbations for faster processing.
+
+    This function uses pre-perturbed videos loaded from disk instead of
+    applying perturbations on-the-fly, significantly speeding up evaluation.
+
+    Args:
+        model: Watermarking model (must have embed() and extract() methods)
+        perturbed_dataset: PerturbedVideoDataset with pre-applied perturbations for removal attack
+        original_dataset: Original video dataset iterator for watermark embedding
+        output_dir: Directory to save results
+        logger: Optional logger
+        max_frames_per_video: Maximum frames per video
+        evaluate_forgery: Whether to evaluate forgery attacks
+        perturbed_forgery_dataset: PerturbedVideoDataset for forgery attack (unwatermarked videos)
+
+    Returns:
+        DataFrame with evaluation results
+    """
+
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    results = []
+
+    # Get perturbation info from dataset
+    perturbations_info = perturbed_dataset.get_perturbations()
+    video_names_in_perturbed = set(perturbed_dataset.get_video_names())
+
+    logger.info(f"Evaluating {len(perturbations_info)} pre-applied perturbations")
+    logger.info(
+        f"Processing {len(video_names_in_perturbed)} videos from perturbed dataset"
+    )
+    if evaluate_forgery:
+        logger.info("Evaluating both removal and forgery attacks")
+
+    # Create a mapping of video names to their embedded messages
+    # We need to embed watermarks first, then evaluate each perturbation
+    embedded_cache: Dict[str, Dict] = {}
+
+    # First pass: Embed watermarks in original videos
+    # Only embed for videos that exist in the perturbed dataset
+    logger.info("Phase 1: Embedding watermarks in original videos...")
+    video_count = 0
+    for video, video_info in original_dataset:
+        video_name = video_info.get("name", f"video_{video_count}")
+
+        # Skip videos not in perturbed dataset
+        if video_name not in video_names_in_perturbed:
+            continue
+
+        video_count += 1
+
+        # Limit frames if specified
+        if max_frames_per_video and video.shape[0] > max_frames_per_video:
+            video = video[:max_frames_per_video]
+
+        logger.info(f"Embedding watermark in video {video_count}: {video_name}")
+
+        with torch.no_grad():
+            embed_result = model.embed(video)
+            embedded_message = embed_result["message"]
+            embedded_message_long = embedded_message.long()
+
+        embedded_cache[video_name] = {
+            "message": embedded_message,
+            "message_long": embedded_message_long,
+            "device": video.device,
+        }
+
+        # Free memory
+        del video
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Stop if we've processed all videos in perturbed dataset
+        if video_count >= len(video_names_in_perturbed):
+            break
+
+    logger.info(f"Embedded watermarks in {len(embedded_cache)} videos")
+
+    # Second pass: Evaluate each perturbation
+    logger.info("Phase 2: Evaluating perturbations...")
+    for pert_info in tqdm(perturbations_info, desc="Perturbations"):
+        pert_name = pert_info["name"]
+        pert_class = pert_info["class"]
+        pert_params = pert_info["params"]
+
+        logger.info(f"Evaluating perturbation: {pert_name}")
+
+        # ===== REMOVAL ATTACK =====
+        # Iterate over perturbed videos for this perturbation
+        for perturbed_video, video_meta in perturbed_dataset.iterate_perturbation(
+            pert_name
+        ):
+            video_name = video_meta["name"]
+
+            # Limit frames if specified
+            if max_frames_per_video and perturbed_video.shape[0] > max_frames_per_video:
+                perturbed_video = perturbed_video[:max_frames_per_video]
+
+            # Get embedded message for this video
+            if video_name not in embedded_cache:
+                logger.warning(f"No embedded message found for {video_name}, skipping")
+                continue
+
+            cache_entry = embedded_cache[video_name]
+            embedded_message_long = cache_entry["message_long"]
+
+            # Move to same device as perturbed video
+            device = perturbed_video.device
+            if embedded_message_long.device != device:
+                embedded_message_long = embedded_message_long.to(device)
+
+            # Extract watermark from perturbed video
+            with torch.no_grad():
+                try:
+                    logits = model.extract(perturbed_video)  # Shape: (T, K)
+                except Exception as e:
+                    logger.warning(
+                        f"Error extracting from {pert_name} for {video_name}: {e}"
+                    )
+                    continue
+
+            # Match dimensions
+            logits_device = logits.device
+            if embedded_message_long.device != logits_device:
+                embedded_message_long_device = embedded_message_long.to(logits_device)
+            else:
+                embedded_message_long_device = embedded_message_long
+
+            if logits.shape[1] > embedded_message_long_device.shape[0]:
+                logits_matched = logits[:, : embedded_message_long_device.shape[0]]
+                watermark_gt = embedded_message_long_device
+            elif logits.shape[1] < embedded_message_long_device.shape[0]:
+                logits_matched = logits
+                watermark_gt = embedded_message_long_device[: logits.shape[1]]
+            else:
+                logits_matched = logits
+                watermark_gt = embedded_message_long_device
+
+            # Evaluate with all aggregation strategies
+            for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
+                try:
+                    detected = _call_with_watermark_gt_tensor(
+                        agg_func, logits_matched, watermark_gt
+                    )
+                    results.append(
+                        {
+                            "video": video_name,
+                            "perturbation": pert_class,
+                            "perturbation_params": str(pert_params),
+                            "aggregation": agg_name,
+                            "detected": bool(detected),
+                            "attack_type": "removal",
+                            "type": "common",
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error in {agg_name} for {pert_name} (removal): {e}"
+                    )
+
+            # Free memory
+            del perturbed_video, logits
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        # ===== FORGERY ATTACK =====
+        if evaluate_forgery and perturbed_forgery_dataset is not None:
+            # Iterate over perturbed forgery videos (unwatermarked)
+            for (
+                perturbed_original,
+                forgery_meta,
+            ) in perturbed_forgery_dataset.iterate_perturbation(pert_name):
+                video_name_forgery = forgery_meta["name"]
+
+                # Limit frames if specified
+                if (
+                    max_frames_per_video
+                    and perturbed_original.shape[0] > max_frames_per_video
+                ):
+                    perturbed_original = perturbed_original[:max_frames_per_video]
+
+                # For forgery, we use the embedded message pattern as reference
+                # Get any embedded message to use as reference pattern
+                if not embedded_cache:
+                    logger.warning("No embedded messages available for forgery check")
+                    continue
+
+                # Use first video's embedded message as reference
+                ref_video_name = next(iter(embedded_cache))
+                ref_cache = embedded_cache[ref_video_name]
+                ref_message_long = ref_cache["message_long"]
+
+                device = perturbed_original.device
+                if ref_message_long.device != device:
+                    ref_message_long = ref_message_long.to(device)
+
+                # Extract watermark from unwatermarked video
+                with torch.no_grad():
+                    try:
+                        logits_forgery = model.extract(perturbed_original)
+                    except Exception as e:
+                        logger.warning(
+                            f"Error extracting from {pert_name} (forgery): {e}"
+                        )
+                        continue
+
+                # Match dimensions
+                logits_forgery_device = logits_forgery.device
+                if ref_message_long.device != logits_forgery_device:
+                    ref_message_long_device = ref_message_long.to(logits_forgery_device)
+                else:
+                    ref_message_long_device = ref_message_long
+
+                if logits_forgery.shape[1] > ref_message_long_device.shape[0]:
+                    logits_forgery_matched = logits_forgery[
+                        :, : ref_message_long_device.shape[0]
+                    ]
+                    watermark_gt_forgery = ref_message_long_device
+                elif logits_forgery.shape[1] < ref_message_long_device.shape[0]:
+                    logits_forgery_matched = logits_forgery
+                    watermark_gt_forgery = ref_message_long_device[
+                        : logits_forgery.shape[1]
+                    ]
+                else:
+                    logits_forgery_matched = logits_forgery
+                    watermark_gt_forgery = ref_message_long_device
+
+                # Evaluate with all aggregation strategies
+                for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
+                    try:
+                        detected_forgery = _call_with_watermark_gt_tensor(
+                            agg_func, logits_forgery_matched, watermark_gt_forgery
+                        )
+                        results.append(
+                            {
+                                "video": video_name_forgery,
+                                "perturbation": pert_class,
+                                "perturbation_params": str(pert_params),
+                                "aggregation": agg_name,
+                                "detected": bool(detected_forgery),
+                                "attack_type": "forgery",
+                                "type": "common",
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Error in {agg_name} for {pert_name} (forgery): {e}"
+                        )
+
+                # Free memory
+                del perturbed_original, logits_forgery
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    df = pd.DataFrame(results)
+    output_file = output_dir / "common_perturbations_results.csv"
+    df.to_csv(output_file, index=False)
+    logger.info(f"Saved results to {output_file}")
+
+    # Calculate and save statistics
+    from evaluate.utils import calculate_statistics
+
+    stats = calculate_statistics(df, logger)
+    stats_file = output_dir / "common_perturbations_stats.json"
+    import json
+
+    with open(stats_file, "w") as f:
+        json.dump(stats, f, indent=2)
+    logger.info(f"Saved statistics to {stats_file}")
+
+    return df
