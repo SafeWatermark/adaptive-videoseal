@@ -151,7 +151,12 @@ class VideoMarkBenchModel:
         # Use actual detection results from model (including real detection bit)
         # If gradient computation is needed, bypass @torch.no_grad() decorator
         # by calling detector directly (only works for single frames in whitebox attacks)
-        if requires_grad:
+        # Also check if input tensor requires grad (for compatibility with original Wevade functions)
+        needs_grad = requires_grad or (
+            video.requires_grad if isinstance(video, torch.Tensor) else False
+        )
+
+        if needs_grad:
             # For gradient computation, call detector directly to bypass @torch.no_grad()
             # This is only safe for single frames (is_video=False) used in whitebox attacks
             if not is_video and hasattr(self.model, "detector"):

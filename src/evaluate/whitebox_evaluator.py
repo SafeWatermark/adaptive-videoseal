@@ -180,8 +180,11 @@ def evaluate_whitebox_attacks(
             f"Unknown wevade_version: {wevade_version}. Must be 'standard' or 'adaptive'"
         )
 
-    # Get actual model (unwrap VideoMarkBenchModel wrapper if needed)
-    actual_model = model.model if hasattr(model, "model") else model
+    # Pass wrapper model to original Wevade functions (not unwrapped)
+    # The wrapper's detect() method handles gradient computation correctly
+    # by checking if input tensor requires_grad, even when requires_grad parameter
+    # is not explicitly passed (for compatibility with original Wevade functions)
+    actual_model = model  # Keep wrapper to use detect() with gradient support
 
     results = []
     device = model.device
