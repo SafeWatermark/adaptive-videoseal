@@ -156,7 +156,15 @@ class REVMarkExtractor(Extractor):
         """
         T = frames.shape[0]
         indices = [int(i * T / REVMARK_FRAME_SIZE) for i in range(REVMARK_FRAME_SIZE)]
-        return frames[indices].clone()
+
+        original_positions = []
+        seen: set[int] = set()
+        for i, idx in enumerate(indices):
+            if idx not in seen:
+                seen.add(idx)
+                original_positions.append(i)
+
+        return frames[indices].clone(), original_positions
 
     def _preprocess(self, imgs: torch.Tensor) -> tuple[torch.Tensor, dict]:
         """
@@ -281,21 +289,17 @@ class REVMarkExtractor(Extractor):
 
             # Pad if needed
             if chunk_len < REVMARK_FRAME_SIZE:
-                chunk = self._temporal_pad(chunk)
+                chunk, original_positions = self._temporal_pad(chunk)
 
-            # # Reshape (8, C, H, W) -> (1, C, 8, H, W) for REVMark
-            # chunk = chunk.permute(1, 0, 2, 3).unsqueeze(0)
-
-            # # Run decoder
-            # msg = self.decoder(chunk) # (1, num_bits)
-            # msg = msg.repeat(chunk_len, 1) # (chunk_len, num_bits)
-            # decoded_msgs[start:end, :] = msg
             if self.detection_mode == "per_frame":
-                msg_block = self._decode_per_frame(chunk)  # (B, num_bits)
+                msg_block = self._decode_per_frame(chunk)  # (8, num_bits)
             elif self.detection_mode == "per_block":
-                msg_block = self._decode_per_block(chunk)  # (B, num_bits)
+                msg_block = self._decode_per_block(chunk)  # (8, num_bits)
             else:
                 raise ValueError(f"Invalid detection_mode: {self.detection_mode}")
+            if chunk_len < REVMARK_FRAME_SIZE:
+                msg_block = msg_block[original_positions]
+
             decoded_msgs[start:end, :] = msg_block
 
         return self._postprocess(decoded_msgs)
