@@ -13,7 +13,8 @@ import logging
 
 
 @pytest.mark.parametrize(
-    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+    "model_name",
+    ["videoseal_model", "stega_stamp_videoseal_model", "revmark_videoseal_model"],
 )
 def test_get_videoseal(request, model_name: str):
     """Test that the videoseal model loads and can perform a basic embed pass."""
@@ -45,7 +46,8 @@ def test_get_videoseal(request, model_name: str):
 
 
 @pytest.mark.parametrize(
-    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+    "model_name",
+    ["videoseal_model", "stega_stamp_videoseal_model", "revmark_videoseal_model"],
 )
 def test_from_videoseal(request, model_name: str, make_adaptive_videoseal):
     """
@@ -93,7 +95,8 @@ def test_from_videoseal(request, model_name: str, make_adaptive_videoseal):
 
 
 @pytest.mark.parametrize(
-    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+    "model_name",
+    ["videoseal_model", "stega_stamp_videoseal_model", "revmark_videoseal_model"],
 )
 def test_adaptive_videoseal_embed_matches_parent(
     request, model_name: str, make_adaptive_videoseal
@@ -154,7 +157,8 @@ def test_adaptive_videoseal_embed_matches_parent(
 
 
 @pytest.mark.parametrize(
-    "model_name", ["videoseal_model", "stega_stamp_videoseal_model"]
+    "model_name",
+    ["videoseal_model", "stega_stamp_videoseal_model", "revmark_videoseal_model"],
 )
 def test_adaptive_videoseal_detached_from_parent(
     request, model_name: str, make_adaptive_videoseal
