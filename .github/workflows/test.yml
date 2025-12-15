@@ -71,14 +71,14 @@ jobs:
         uses: actions/cache@v3
         with:
           path: onnx/stega_stamp.onnx
-          key: stega-stamp-assets
+          key: stega-stamp-v0.0.1
 
       - name: Cache ME_Spynet_Full model
         id: cache-spynet
         uses: actions/cache@v3
         with:
           path: ME_Spynet_Full.pth
-          key: me-spynet-assets
+          key: me-spynet-v0.0.1
 
       # ----------------------------
       # Download models only if cache is missing
@@ -86,7 +86,7 @@ jobs:
       - name: Download ONNX
         if: steps.cache-onnx.outputs.cache-hit != 'true'
         run: |
-          gh release download assets \
+          gh release download v0.0.1 \
             --repo ${{ github.repository }} \
             --pattern "stega_stamp.onnx" \
             --dir "./onnx"
@@ -101,7 +101,7 @@ jobs:
       - name: Download ME_Spynet_Full.pth
         if: steps.cache-spynet.outputs.cache-hit != 'true'
         run: |
-          gh release download assets \
+          gh release download v0.0.1 \
             --repo ${{ github.repository }} \
             --pattern "ME_Spynet_Full.pth" \
             --dir "."
