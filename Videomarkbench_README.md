@@ -19,7 +19,7 @@ git submodule update --init --recursive
 원본 VideoMarkBench 레포지토리는 다음과 같은 구조를 가지고 있습니다:
 
 - **common_perturabtions/**: 일반적인 perturbation들 (JPEG, Gaussian, Crop, FrameAverage, FrameRemove, FrameSwitch 등)
-- **blackbox_perturbations/**: 
+- **blackbox_perturbations/**:
   - `square_attack/`: forgery_attack.py, removal_attack.py
   - `triangle_attack/`: forgery_TA.py, removal_TA.py
 - **whitebox_perturbations/**: WEvade 공격 (각 워터마크 방법별로 구현)
@@ -43,6 +43,21 @@ data/videomarkbench/
 
 Kinetics-400 샘플을 다운로드하려면:
 
+**권장: 사전 검증된 CSV 파일 사용**
+
+```bash
+# 사전 검증된 CSV 파일을 사용하여 다운로드 (권장)
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics
+
+# 또는 사용자 지정 CSV 파일 지정
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics \
+    --csv_file data/kinetics/kinetics400_available_1000.csv
+```
+
+**대안: 랜덤 샘플링 모드**
+
 ```bash
 PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
     --output_dir data/kinetics \
@@ -56,12 +71,12 @@ PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
 
 ```
 data/kinetics/
+  kinetics400_available_1000.csv  # 사전 검증된 비디오 목록 (선택사항)
   videos/
-    {action_class}/
-      {youtube_id}_{time_start}.mp4
+    {label}_{youtube_id}_{time_start}.mp4
 ```
 
-**참고:** 
+**참고:**
 - Removal 공격은 VideoMarkBench 데이터셋 사용
 - Forgery 공격은 Kinetics 데이터셋 사용
 - `--kinetics_dataset`이 지정되지 않으면 forgery 공격도 VideoMarkBench 데이터셋 사용 (하위 호환성)

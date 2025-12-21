@@ -2,10 +2,11 @@
 """
 Download a sample subset of Kinetics-400 dataset for forgery attack evaluation.
 
-This script downloads a small subset of Kinetics-400 videos:
-- Selects a few action classes (default: 10 classes)
-- Downloads a few videos per class (default: 5 videos per class)
-- Total: ~50 videos (~1-2GB)
+This script supports two modes:
+1. CSV file mode (recommended): Downloads videos from a pre-validated CSV file
+   containing accessible video IDs (e.g., kinetics400_available_1000.csv)
+2. Random sampling mode: Randomly samples videos from Kinetics-400 annotations
+   (may include inaccessible videos that fail to download)
 """
 
 import csv
@@ -133,15 +134,13 @@ def download_video(
         print("  pip install yt-dlp")
         return False
 
-    # Create label directory
-    label_dir = output_dir / label.replace(" ", "_").replace("/", "_")
-    label_dir.mkdir(parents=True, exist_ok=True)
-
     # YouTube URL
     url = f"https://www.youtube.com/watch?v={youtube_id}"
 
-    # Output filename
-    output_file = label_dir / f"{youtube_id}_{time_start}.mp4"
+    # Output filename: {label}_{youtube_id}_{time_start}.mp4
+    # Store directly in output_dir (videos directory)
+    label_safe = label.replace(" ", "_").replace("/", "_")
+    output_file = output_dir / f"{label_safe}_{youtube_id}_{time_start}.mp4"
 
     if output_file.exists():
         print(f"  Video already exists: {output_file.name}")
@@ -192,7 +191,18 @@ def download_video(
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Download sample Kinetics-400 videos")
+    parser = argparse.ArgumentParser(
+        description="Download sample Kinetics-400 videos",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Use pre-validated CSV file (recommended)
+  python scripts/download_kinetics_sample.py --csv_file data/kinetics/kinetics400_available_1000.csv
+
+  # Random sampling mode (may include inaccessible videos)
+  python scripts/download_kinetics_sample.py --split val --num_classes 10 --videos_per_class 5
+        """,
+    )
     parser.add_argument(
         "--output_dir",
         type=str,
@@ -200,58 +210,98 @@ def main():
         help="Output directory for videos (default: data/kinetics)",
     )
     parser.add_argument(
+        "--csv_file",
+        type=str,
+        default=None,
+        help="Path to CSV file with accessible video IDs (youtube_id,time_start,label). "
+        "If provided, uses this file instead of random sampling. "
+        "Default: data/kinetics/kinetics400_available_1000.csv",
+    )
+    parser.add_argument(
         "--split",
         type=str,
         default="val",
         choices=["train", "val", "test"],
-        help="Dataset split to download (default: val)",
+        help="Dataset split to download (only used if --csv_file is not provided, default: val)",
     )
     parser.add_argument(
         "--num_classes",
         type=int,
         default=10,
-        help="Number of action classes to sample (default: 10)",
+        help="Number of action classes to sample (only used if --csv_file is not provided, default: 10)",
     )
     parser.add_argument(
         "--videos_per_class",
         type=int,
         default=5,
-        help="Number of videos per class (default: 5)",
+        help="Number of videos per class (only used if --csv_file is not provided, default: 5)",
     )
     parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed for sampling (default: 42)"
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for sampling (only used if --csv_file is not provided, default: 42)",
     )
 
     args = parser.parse_args()
 
-    random.seed(args.seed)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=" * 70)
-    print("Kinetics-400 Sample Downloader")
-    print("=" * 70)
-    print(f"Output directory: {output_dir}")
-    print(f"Split: {args.split}")
-    print(f"Number of classes: {args.num_classes}")
-    print(f"Videos per class: {args.videos_per_class}")
-    print(f"Total videos: {args.num_classes * args.videos_per_class}")
-    print()
+    # Determine CSV file path
+    if args.csv_file:
+        csv_file = Path(args.csv_file)
+    else:
+        # Try default CSV file
+        default_csv = output_dir / "kinetics400_available_1000.csv"
+        if default_csv.exists():
+            csv_file = default_csv
+            print(f"Using default CSV file: {csv_file}")
+        else:
+            csv_file = None
 
-    # Download annotations
-    annotation_file = download_annotations(args.split, output_dir)
+    # Use CSV file mode if available
+    if csv_file is not None and csv_file.exists():
+        print("=" * 70)
+        print("Kinetics-400 Sample Downloader (CSV Mode)")
+        print("=" * 70)
+        print(f"CSV file: {csv_file}")
+        print(f"Output directory: {output_dir}")
+        print()
 
-    # Parse annotations
-    print(f"Parsing annotations from {annotation_file}...")
-    videos = parse_annotations(annotation_file)
-    print(f"Found {len(videos)} videos in annotations")
+        # Parse CSV file
+        print(f"Reading video list from {csv_file}...")
+        sampled = parse_annotations(csv_file)
+        print(f"Found {len(sampled)} videos in CSV file")
 
-    # Sample videos
-    print(
-        f"\nSampling {args.num_classes} classes with {args.videos_per_class} videos each..."
-    )
-    sampled = sample_videos(videos, args.num_classes, args.videos_per_class)
-    print(f"Selected {len(sampled)} videos total")
+    else:
+        # Random sampling mode (original behavior)
+        print("=" * 70)
+        print("Kinetics-400 Sample Downloader (Random Sampling Mode)")
+        print("=" * 70)
+        print(f"Output directory: {output_dir}")
+        print(f"Split: {args.split}")
+        print(f"Number of classes: {args.num_classes}")
+        print(f"Videos per class: {args.videos_per_class}")
+        print(f"Total videos: {args.num_classes * args.videos_per_class}")
+        print()
+
+        random.seed(args.seed)
+
+        # Download annotations
+        annotation_file = download_annotations(args.split, output_dir)
+
+        # Parse annotations
+        print(f"Parsing annotations from {annotation_file}...")
+        videos = parse_annotations(annotation_file)
+        print(f"Found {len(videos)} videos in annotations")
+
+        # Sample videos
+        print(
+            f"\nSampling {args.num_classes} classes with {args.videos_per_class} videos each..."
+        )
+        sampled = sample_videos(videos, args.num_classes, args.videos_per_class)
+        print(f"Selected {len(sampled)} videos total")
 
     # Download videos
     print(f"\nDownloading videos to {output_dir}...")

@@ -172,6 +172,22 @@ data/videomarkbench/
 
 For forgery attack evaluation, you need to download a sample of the Kinetics-400 dataset. We provide a script to download a subset:
 
+**Recommended: Use pre-validated CSV file (avoids inaccessible videos)**
+
+```bash
+# Download using pre-validated CSV file (recommended)
+# The script will automatically use data/kinetics/kinetics400_available_1000.csv if it exists
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics
+
+# Or specify a custom CSV file
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics \
+    --csv_file data/kinetics/kinetics400_available_1000.csv
+```
+
+**Alternative: Random sampling mode (may include inaccessible videos)**
+
 ```bash
 # Download a sample subset (default: 10 classes, 5 videos per class)
 PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
@@ -184,10 +200,11 @@ PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
 
 **Options:**
 - `--output_dir`: Output directory (default: `data/kinetics`)
-- `--split`: Dataset split to download - `train`, `val`, or `test` (default: `val`)
-- `--num_classes`: Number of action classes to sample (default: 10)
-- `--videos_per_class`: Number of videos per class (default: 5)
-- `--seed`: Random seed for sampling (default: 42)
+- `--csv_file`: Path to CSV file with accessible video IDs (youtube_id,time_start,label). If not specified, uses `data/kinetics/kinetics400_available_1000.csv` if it exists. Otherwise, uses random sampling mode.
+- `--split`: Dataset split to download - `train`, `val`, or `test` (only used in random sampling mode, default: `val`)
+- `--num_classes`: Number of action classes to sample (only used in random sampling mode, default: 10)
+- `--videos_per_class`: Number of videos per class (only used in random sampling mode, default: 5)
+- `--seed`: Random seed for sampling (only used in random sampling mode, default: 42)
 
 **Requirements:**
 - `yt-dlp` must be installed (automatically installed via `uv sync`)
@@ -196,9 +213,9 @@ The downloaded videos will be organized as:
 
 ```
 data/kinetics/
+  kinetics400_available_1000.csv  # Pre-validated video list (optional)
   videos/
-    {action_class}/
-      {youtube_id}_{time_start}.mp4
+    {label}_{youtube_id}_{time_start}.mp4
 ```
 
 **3. Complete Dataset Structure**
@@ -212,9 +229,9 @@ data/
       {style}/             # realistic, cartoon, sci-fi
         {id}.mp4
   kinetics/                # Forgery 공격용 (Kinetics-400 샘플)
+    kinetics400_available_1000.csv  # Pre-validated video list (optional)
     videos/
-      {action_class}/
-        {video_id}.mp4
+      {label}_{youtube_id}_{time_start}.mp4
 ```
 
 #### Running Evaluation
@@ -242,7 +259,7 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - `--wevade_version`: `standard` or `adaptive` (default: `standard`)
 - `--wevade_rb`: Perturbation bound (L-infinity norm) (default: 0.1)
 
-**Note:** 
+**Note:**
 - **Removal attacks** use the VideoMarkBench dataset (generated AI videos)
 - **Forgery attacks** use the Kinetics dataset (real-world videos)
 - If `--kinetics_dataset` is not specified, forgery attacks will use the same dataset as removal attacks (for backward compatibility)
