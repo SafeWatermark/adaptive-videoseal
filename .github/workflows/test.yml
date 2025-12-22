@@ -9,6 +9,9 @@ on:
       - opened
       - synchronize
 
+permissions:
+  contents: read
+
 jobs:
 
   test:
@@ -21,6 +24,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install GitHub CLI
+        run: |
+          (type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
+            && sudo mkdir -p -m 755 /etc/apt/keyrings \
+            && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+            && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+            && sudo mkdir -p -m 755 /etc/apt/sources.list.d \
+            && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+            && sudo apt update \
+            && sudo apt install gh -y
+
+      - name: Authenticate gh
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -42,8 +60,33 @@ jobs:
         run: |
           sudo apt-get install -y ffmpeg
 
-      # - name: Lint
-      #   run: uv run bash scripts/format.sh
+      # -------------------------
+      # Cache onnx
+      # -------------------------
+      - name: Cache ONNX model
+        id: cache-onnx
+        uses: actions/cache@v3
+        with:
+          path: onnx/stega_stamp.onnx
+          key: stega-stamp-v0.0.1
+
+      # ----------------------------
+      # Download ONNX only if cache is missing
+      # ----------------------------
+      - name: Download ONNX
+        if: steps.cache-onnx.outputs.cache-hit != 'true'
+        run: |
+          gh release download v0.0.1 \
+            --repo ${{ github.repository }} \
+            --pattern "stega_stamp.onnx" \
+            --dir "./onnx"
+
+          # Check file size safely
+          FILE_SIZE=$(stat -c%s "onnx/stega_stamp.onnx")
+          if [ "$FILE_SIZE" -lt 100000 ]; then
+            echo "ERROR: Downloaded ONNX file is invalid or too small. Size: $FILE_SIZE bytes"
+            exit 1
+          fi
 
       - name: Run tests
         run: uv run bash scripts/test.sh

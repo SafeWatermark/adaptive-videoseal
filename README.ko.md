@@ -59,7 +59,7 @@ bash scripts/format.sh
 AdaptiveVideoseal은 장면 변화(scene change)를 감지해 키프레임 선택 및 워터마크 전파를 최적화합니다.
 실험 시 --scene_detector 옵션을 통해 다양한 감지 방식을 선택할 수 있습니다.
 
-**Detector Types**
+#### **Detector Types**
 
 | Detector      | Description                                                                                                    |
 | ------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -68,20 +68,31 @@ AdaptiveVideoseal은 장면 변화(scene change)를 감지해 키프레임 선�
 | **hash**      | 이미지 perception hash 기반으로 프레임 유사도를 계산하며, 빠른 장면 변화 검출에 적합합니다.                                                                 |
 | **lpips**    | 딥러닝 기반 지각적 유사도 지표(LPIPS) 를 사용해 연속 프레임 간의 ‘지각적 차이’를 기반으로 장면 전환을 감지합니다. |
 
+---
 
+#### **Model Types**
+
+Adaptive VideoSeal 프로젝트는 **VideoSeal** 모델 외에도 **StegaStamp** 모델을 지원합니다.
+
+| Model      | Details                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Videoseal**   | 기본 모델입니다. Meta의 공식 VideoSeal 1.0 가중치를 기반으로 Adaptive Pipeline을 적용합니다. |
+| **StegaStamp** | 별도의 ONNX 모델 파일(`stega_stamp.onnx`)이 필요합니다. <br> (자세한 설정은 **3.3 StegaStamp 모델 사용** 안내 참고). |
+| **REVMark**      | 지원 예정. 추후 업데이트를 통해 통합될 예정입니다. |
+---
 
 ### 3.2 Adaptive watermarking 실험
 
 ```bash
-bash scripts/run_content_detector.sh # content_detector를 활용한 experiment 실행
-bash scripts/run_histogram_detector.sh # histogram detector를 활용한 experiment 실행
-bash scripts/run_hash_detector.sh # hash detector를 활용한 experiment 실행
-bash scripts/run_lpips_detector.sh # lpips detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_content_detector.sh     # content_detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_histogram_detector.sh   # histogram detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_hash_detector.sh        # hash detector를 활용한 experiment 실행
+bash scripts/poc/videoseal/run_lpips_detector.sh        # lpips detector를 활용한 experiment 실행
 ```
 
 ### 실행 흐름
 
-1. **기본 VideoSeal 가중치 로드**
+1. **VideoSeal 1.0. 가중치 로드**
 2. `AdaptiveVideoseal` 인스턴스화 → adaptive propagation 활성화
 3. `data/sample_video.mp4`에 워터마크 삽입
 4. `outputs/` 폴더에 결과 저장 (기본 및 적응형 두 버전)
@@ -93,7 +104,31 @@ bash scripts/run_lpips_detector.sh # lpips detector를 활용한 experiment 실�
 * `outputs/adaptive_1.mp4` → 적응형 모델 워터마킹 결과
 * `outputs/*.txt` → 재현 가능한 페이로드 비트 저장
 
-### 3.3 SA-V validation 이미지 → 비디오 변환
+### 3.3 Stega Stamp 모델 사용 안내
+StegaStamp 모델의 추론(inference)을 위해서는 **`stega_stamp.onnx`** 파일이 필요합니다.
+
+  * **파일 다운로드 출처:**
+
+      * 해당 파일은 본 저장소의 **GitHub Releases** 섹션에서 다운로드할 수 있습니다.
+        * 원본 출처: [Waves repository](https://github.com/umd-huang-lab/WAVES/tree/main/decoders)
+
+  * **파일 저장 경로:**
+
+      * 다운로드한 `stega_stamp.onnx` 파일을 프로젝트 루트 디렉터리 기준으로 `onnx/stega_stamp.onnx` 경로에 저장해야 합니다.
+
+
+해당 파일을 준비하면 Adaptive VideoSeal 환경에서 `StegaStamp` 모델의 워터마킹 실험도 수행할 수 있습니다.
+
+#### 실행 스크립트
+
+```bash
+```bash
+bash scripts/poc/stega_stamp/run_content_detector.sh     # content_detector를 활용한 experiment 실행
+bash scripts/poc/stega_stamp/run_histogram_detector.sh   # histogram detector를 활용한 experiment 실행
+...
+```
+
+### 3.4 SA-V validation 이미지 → 비디오 변환
 
 SA-V validation 데이터셋은 각 샘플이 **JPEG 이미지 시퀀스(프레임 폴더)** 형태로 제공됩니다.
 Adaptive VideoSeal로 평가하려면 먼저 이 이미지 프레임들을 MP4 비디오로 변환해야 합니다.
@@ -106,7 +141,7 @@ uv run scripts/sav_val_image2video.py --data_path <JPEGImages directory>
 
 각 폴더의 프레임을 하나의 `.mp4` 비디오로 자동 변환합니다.
 
-### 3.4 Scene-Detector Threshold Experiments
+### 3.5 Scene-Detector Threshold Experiments
 
 * `src/threshold_experiment.py`를 사용해 Scene-Detector Threshold(τ)와 step_size를 실험합니다.
 
