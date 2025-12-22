@@ -34,6 +34,8 @@ dependencies = [
     "albumentations>=2.0.8",
     "onnxruntime>=1.23.2",
     "onnx2torch>=1.5.15",
+    "yt-dlp>=2025.11.12",
+    "easydict>=1.13",
 ]
 
 
@@ -44,6 +46,7 @@ where = ["src/videoseal"]
 dev = [
     "coverage>=7.11.2",
     "pytest>=8.4.2",
+    "ruff>=0.14.8",
 ]
 
 [tool.pytest.ini_options]
@@ -60,5 +63,9 @@ omit = [
 [tool.ruff]
 exclude = [
     "src/videoseal",
+    "src/videomarkbench",
     "src/notebooks",
 ]
+
+[tool.ruff.lint]
+ignore = ["E402"]  # Module level import not at top of file (needed for sys.path manipulation)

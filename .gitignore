@@ -16,12 +16,17 @@ onnx/
 
 # IDE
 .vscode/
+.cursor/
 
 *.egg-info
 
 # result
 outputs/
+# Exclude all data files, but include specific metadata files
 data/*
+!data/kinetics/
+data/kinetics/*
+!data/kinetics/kinetics400_available_1000.csv
 ckpts/
 
 # test
