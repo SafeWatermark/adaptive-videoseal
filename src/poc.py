@@ -242,9 +242,10 @@ def run_experiment(args):
     logger.info(f"Input dir: {input_dir}")
     logger.info(f"Output dir: {output_dir}")
 
+    model_kwargs = {"ecc_mode": args.ecc_mode}
     # Fixed model paths
     if args.model == "videoseal":
-        model = get_videoseal()
+        model = get_videoseal(**model_kwargs)
         model.blender.scaling_w = args.scaling_w
     elif args.model == "stega_stamp":
         if args.onnx_path is None:
@@ -255,7 +256,7 @@ def run_experiment(args):
                 "(original source: https://github.com/umd-huang-lab/WAVES/tree/main/decoders)."
             )
 
-        model = get_stega_stamp_videoseal(args.onnx_path)
+        model = get_stega_stamp_videoseal(args.onnx_path, **model_kwargs)
         if args.scaling_w != 1.0:
             logger.info(
                 f"'scaling_w' was set to {args.scaling_w}, but StegaStamp requires a 1:1 blend. "
@@ -272,6 +273,7 @@ def run_experiment(args):
         model = get_revmark_videoseal(
             os.path.join(revmark_path, "checkpoints/Encoder.pth"),
             os.path.join(revmark_path, "checkpoints/Decoder.pth"),
+            **model_kwargs,
         )
 
     model = model.eval().to(device)
@@ -336,7 +338,7 @@ def run_experiment(args):
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
 
-        if args.model == "revmark":
+        if args.model == "revmark" or args.ecc_mode:
             adaptive_bit_acc = (
                 bit_accuracy(
                     adaptive_soft_msgs, adaptive_msgs_ori, threshold=0.5
@@ -429,6 +431,12 @@ if __name__ == "__main__":
         default="videoseal",
         choices=["videoseal", "stega_stamp", "revmark"],
         help="Watermarking model to use ('videoseal' or 'stega_stamp').",
+    )
+    parser.add_argument(
+        "--ecc_mode",
+        action="store_true",
+        default=False,
+        help="If set, use error correction code(ecc) for embedding and detecting",
     )
     parser.add_argument(
         "--onnx_path",
