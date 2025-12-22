@@ -15,9 +15,6 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 sys.path.insert(0, str(parent_dir / "videoseal"))
 
-from adaptive_models.adaptive_videoseal import AdaptiveVideoseal  # noqa: E402
-from videoseal.models import Videoseal  # noqa: E402
-
 
 class VideoMarkBenchModel:
     """
@@ -120,28 +117,62 @@ class VideoMarkBenchModel:
 
         return logits
 
-    def detect(self, video: torch.Tensor, is_video: bool = True) -> Dict:
+    def detect(
+        self, video: torch.Tensor, is_video: bool = True, requires_grad: bool = False
+    ) -> Dict:
         """
         Detect watermark in video (for compatibility with original VideoMarkBench).
 
         Args:
             video: Video tensor
             is_video: Whether input is video
+            requires_grad: Whether gradient computation is needed (for whitebox attacks)
 
         Returns:
             Dictionary with 'preds' key containing predictions
         """
+        video = video.to(self.device)
+
+        # Ensure video is in correct format: (T, C, H, W)
         if is_video:
-            logits = self.extract(video)
-            # Add detection bit (always 1 for watermarked videos)
-            detection_bit = torch.ones(logits.shape[0], 1, device=logits.device)
-            preds = torch.cat([detection_bit, logits], dim=1)
+            if video.dim() == 3:  # (C, H, W) - single frame
+                video = video.unsqueeze(0)  # (1, C, H, W)
+            elif video.dim() == 4:  # Should be (T, C, H, W)
+                pass  # Already correct
+            elif video.dim() == 5:  # (B, T, C, H, W)
+                video = video.squeeze(0)  # (T, C, H, W)
+            else:
+                raise ValueError(f"Unexpected video shape: {video.shape}")
         else:
             # Single frame
             if video.dim() == 3:
                 video = video.unsqueeze(0)
-            outputs = self.model.detect(video, is_video=False)
-            preds = outputs["preds"]
+
+        # Use actual detection results from model (including real detection bit)
+        # If gradient computation is needed, bypass @torch.no_grad() decorator
+        # by calling detector directly (only works for single frames in whitebox attacks)
+        # Also check if input tensor requires grad (for compatibility with original Wevade functions)
+        needs_grad = requires_grad or (
+            video.requires_grad if isinstance(video, torch.Tensor) else False
+        )
+
+        if needs_grad:
+            # For gradient computation, call detector directly to bypass @torch.no_grad()
+            # This is only safe for single frames (is_video=False) used in whitebox attacks
+            if not is_video and hasattr(self.model, "detector"):
+                # Single frame case: call detector directly
+                preds = self.model.detector(video)  # (1, K+1)
+            else:
+                # Video case: still need to use detect() but it won't compute gradients
+                # This should not be used in practice for whitebox attacks
+                outputs = self.model.detect(video, is_video=is_video)
+                preds = outputs["preds"]
+        else:
+            # No gradient needed, use detect() method normally
+            with torch.no_grad():
+                outputs = self.model.detect(video, is_video=is_video)
+                preds = outputs[
+                    "preds"
+                ]  # (T, K+1) where first column is actual detection bit
 
         return {"preds": preds}
-
