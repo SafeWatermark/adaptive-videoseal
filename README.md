@@ -74,6 +74,17 @@ The **Adaptive VideoSeal** project supports not only the **VideoSeal** model but
 | **VideoSeal**  | The default model. It applies the Adaptive Pipeline based on Meta's official VideoSeal 1.0 weights.                          |
 | **StegaStamp** | Requires a separate ONNX model file (`stega_stamp.onnx`). <br> (For detailed setup, see **3.3 Using the StegaStamp Model**.) |
 | **REVMark**    | Requires ME_Spynet_Full.pth. <br> (For detailed setup, see **3.4 Using the REVMark Model**.)     |
+
+---
+
+#### **ECC Mode (Error Correction)**
+
+Use the `--ecc_mode` flag to enable Reed-Solomon error correction for watermark messages. This improves robustness against bit errors during extraction.
+
+```bash
+uv run python src/poc.py --model videoseal --ecc_mode ...
+```
+
 ---
 
 ### 3.2 Adaptive Watermarking Experiment
