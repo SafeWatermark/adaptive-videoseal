@@ -110,17 +110,32 @@ class REVMarkExtractor(Extractor):
             decoder_path: Path to the decoder checkpoint file (Decoder.pth).
             msg_bits: Number of message bits (default: 96).
             detection_mode:
-                "per_frame":
-                    Performs decoding for each frame using circular temporal shifts.
-                    returns one message per frame.
+                "per_block": (Efficiency-oriented)
+                    Processes the video in non-overlapping consecutive 8-frame chunks.
 
-                "per_block":
-                    Performs a single decode per 8-frame block and broadcasts the result.
-                    Faster; returns one message per block (duplicated across frames).
+                    Example:
+                        [I_0, I_1, ..., I_7] -> [W_0, W_1, ..., W_7] (I: image, W: Watermark)
+
+                    All watermarks(W_0, ..., W_7) have different values but have same message inserted
+
+                "per_frame": (Precision-oriented)
+                    Processes each frame as a 'first frame' by applying a circular
+                    temporal shift to the 8-frame window.
+
+                    It is recommended for high-precision extraction or scenarios
+                    where different messages are embedded in adjacent frames.
+
+                    Example:
+                        [I_0, I_1, ..., I_7] -> [W_0, W_1, ..., W_7], Extract W_0 for I_0
+                        [I_1, I_2, ..., I_0] -> [W_1, W_2, ..., W_0],  Extract W_1 for I_1
+                        ...
+                        [I_7, I_0, ..., I_6] -> [W_7, W_0, ..., W_6], Extract W_7 for I_7
+
+                    All watermarks(W_0, ..., W_7) can have different messages
 
                 Note:
-                    Encourage to use the same watermark_mode for embedding and extraction to ensure
-                    consistent behavior across the pipeline.
+                    It is highly recommended to use the same mode for both embedding
+                    and extraction to ensure consistent message alignment and detection accuracy.
         """
         super().__init__()
 
@@ -132,7 +147,7 @@ class REVMarkExtractor(Extractor):
         self.target_size = (self.video_shape[1], self.video_shape[2])
         self.msg_bits = msg_bits
         self.detection_mode = detection_mode
-        # Import REVMark components
+
         from REVMark.REVMark import Decoder
 
         self.decoder = Decoder(msg_bits, self.video_shape)
