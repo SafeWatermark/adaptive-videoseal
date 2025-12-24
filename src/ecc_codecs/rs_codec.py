@@ -32,11 +32,6 @@ class RSWatermarkCodec:
     The codec can correct up to (parity_bytes // 2) byte errors.
     """
 
-    TOTAL_BITS = 100
-    RS_BITS = 96  # 12 bytes for RS coding
-    RS_BYTES = RS_BITS // 8  # 12 bytes
-    RESERVED_BITS = 4
-
     def __init__(self, total_bits, message_bits: int, threshold: float = 0.5):
         """Initialize RS codec for watermark.
 
@@ -138,7 +133,7 @@ class RSWatermarkCodec:
                              correction failed (too many errors)
             confidence: (optional) Confidence score based on soft values
         """
-        # Take RS portion (first 96 bits)
+        # Take RS portion
         rs_bits = watermark_bits[: self.rs_bits]
 
         # Compute confidence from soft values before hard decision
