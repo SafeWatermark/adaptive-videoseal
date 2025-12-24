@@ -142,7 +142,7 @@ class REVMarkExtractor(Extractor):
         self.decoder.eval()
         self.decoder.tasblock.enable = True
 
-    def _temporal_pad(self, frames: torch.Tensor) -> torch.Tensor:
+    def _temporal_pad(self, frames: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
         """
         Pad frames to 8 using nearest-neighbor temporal upsampling.
 
@@ -281,7 +281,7 @@ class REVMarkExtractor(Extractor):
         imgs_processed, _ = self._preprocess(imgs)
 
         # Process in 8-frame chunks
-        decoded_msgs = torch.empty((F, self.msg_bits))
+        decoded_msgs = torch.empty((F, self.msg_bits), device=imgs.device)
         for start in range(0, F, REVMARK_FRAME_SIZE):
             end = min(start + REVMARK_FRAME_SIZE, F)
             chunk = imgs_processed[start:end]
