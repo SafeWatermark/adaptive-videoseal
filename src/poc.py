@@ -336,8 +336,9 @@ def run_experiment(args):
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
 
-        if args.model == "revmark":
+        if args.model == "revmark" or args.model == "stega_stamp":
             # REVMark's decoder ends with a Sigmoid layer, outputting values in [0, 1].
+            # StegaStamp's decoder outputs binary codes (0 or 1)
             # Thus, a threshold of 0.5 is explicitly required for bit accuracy.
             adaptive_bit_acc = (
                 bit_accuracy(
