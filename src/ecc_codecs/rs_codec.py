@@ -115,7 +115,9 @@ class RSWatermarkCodec:
         for i, message_bytes in enumerate(message_bytes_list):
             # RS encode: message_bytes -> message_bytes + parity_bytes
             encoded_bytes: bytearray = self.rs.encode(message_bytes)
-            bytes_buffer[i] = torch.frombuffer(bytes(encoded_bytes), dtype=torch.uint8)
+            bytes_buffer[i] = torch.frombuffer(
+                bytearray(encoded_bytes), dtype=torch.uint8
+            ).clone()
             # Convert back to bits
         bytes_buffer = bytes_buffer.to(message_bits.device)
         encoded_bits = self._bytes_to_bits(bytes_buffer)
@@ -179,7 +181,9 @@ class RSWatermarkCodec:
                 message_bytes = encoded_bytes[: self.message_bytes]
                 errors_corrected_list.append(-1)  # Indicates correction failure
 
-            bytes_buffer[i] = torch.frombuffer(bytes(message_bytes), dtype=torch.uint8)
+            bytes_buffer[i] = torch.frombuffer(
+                bytearray(message_bytes), dtype=torch.uint8
+            ).clone()
 
         bytes_buffer = bytes_buffer.to(watermark_bits.device)
         message_bits = self._bytes_to_bits(bytes_buffer)
