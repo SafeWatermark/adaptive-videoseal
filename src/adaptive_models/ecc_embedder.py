@@ -1,6 +1,6 @@
 import torch
 from videoseal.models.embedder import Embedder
-from ecc_codecs.rs_codec import RSWatermarkCodec
+from ecc_codecs.base import ECCCodec
 import copy
 
 
@@ -9,6 +9,7 @@ class ECCEmbedder(Embedder):
     def from_embedder(
         cls,
         model: Embedder,
+        ecc_codec: ECCCodec,
         total_bits: int,
         message_bits: int,
         threshold: float = 0.5,
@@ -20,14 +21,15 @@ class ECCEmbedder(Embedder):
             model: Base embedder to wrap
             total_bits: Total watermark bits (codeword length after ECC)
             message_bits: Number of message bits before ECC encoding
-            threshold: Decision threshold (passed to codec for consistency)
+            threshold: Decision threshold
         """
         new = copy.deepcopy(model)
         new.__class__ = cls
 
         new.total_bits = total_bits
         new.message_bits = message_bits
-        new.codec = RSWatermarkCodec(total_bits, message_bits, threshold)
+        new.threshold = threshold
+        new.codec = ecc_codec
         new.register_forward_pre_hook(
             new._ecc_forward_pre_hook,
             with_kwargs=True,

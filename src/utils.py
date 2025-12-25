@@ -15,19 +15,19 @@ from models.stega_stamp import (
     STEGA_STAMP_ATTENUATION,
     STEGA_STAMP_SCALING_W,
     STEGA_STAMP_SCALING_I,
-    STEGA_STAMP_NUM_BITS,
 )
 from models.revmark import (
     REVMARK_DEFAULT_WIDTH,
     REVMARK_ATTENUATION,
     REVMARK_SCALING_I,
     REVMARK_SCALING_W,
-    REVMARK_DEFAULT_MSG_BITS,
 )
 from videoseal.models import Videoseal
 
 from adaptive_models.ecc_embedder import ECCEmbedder
 from adaptive_models.ecc_extractor import ECCExtractor
+from adaptive_models.adaptive_videoseal import AdaptiveVideoseal
+from ecc_codecs.base import ECCCodec
 
 
 def setup_seed(seed: int):
@@ -83,23 +83,49 @@ def select_device(device_choice: str):
 def get_videoseal(ecc_mode: bool = False) -> Videoseal:
     current_path = Path(__file__).resolve().parent
     model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
-    if ecc_mode:
-        total_bits = model.embedder.msg_processor.nbits
-        parity_bits = 16
+    return model
 
-        message_bits = ((total_bits - parity_bits) // 8) * 8
-        model.embedder = ECCEmbedder.from_embedder(
-            model.embedder,
-            total_bits=total_bits,
-            message_bits=message_bits,
-            threshold=0.0,
-        )
-        model.detector = ECCExtractor.from_extractor(
-            model.detector,
-            total_bits=total_bits,
-            message_bits=message_bits,
-            threshold=0.0,
-        )
+
+def transform_ecc_videoseal(
+    model: Videoseal | AdaptiveVideoseal,
+    ecc_codec: ECCCodec,
+    total_bits: int,
+    message_bits: int = 64,
+    threshold: float = 0.5,
+    # input_type: str = "auto",
+) -> Videoseal | AdaptiveVideoseal:
+    """
+    TensorFlow layer can't be copied properly. So if you need PolarWatermarkCodec, recommend to use it.
+    Transform a VideoSeal model to use ECC encoding/decoding.
+
+    Args:
+        model: VideoSeal or AdaptiveVideoseal model to transform
+        total_bits: Total watermark bits (codeword length)
+        message_bits: Number of message bits before ECC (default: 64)
+        threshold: Decision threshold for soft or hard values (default: 0.5 for logits, 0.5 for sigmoid)
+        input_type: Input type for Polar decoder:
+            - "auto": Auto-detect based on value range
+            - "sigmoid": Values in [0, 1] (e.g., RevMark)
+            - "logits": Unbounded values (e.g., VideoSeal 1.0)
+
+    Returns:
+        Transformed model with ECC support
+    """
+    model.embedder = ECCEmbedder.from_embedder(
+        model.embedder,
+        ecc_codec=ecc_codec,
+        total_bits=total_bits,
+        message_bits=message_bits,
+        threshold=threshold,
+    )
+    model.detector = ECCExtractor.from_extractor(
+        model.detector,
+        ecc_codec=ecc_codec,
+        total_bits=total_bits,
+        message_bits=message_bits,
+        threshold=threshold,
+        # input_type=input_type,
+    )
     return model
 
 
@@ -169,23 +195,6 @@ def get_stega_stamp_videoseal(onnx_path: str, ecc_mode: bool = False) -> Videose
     model.embedder = StegaStampEmbedder(onnx_path)
     model.detector = StegaStampExtractor(onnx_path)
 
-    if ecc_mode:
-        total_bits = STEGA_STAMP_NUM_BITS
-        parity_bits = 16
-        message_bits = ((total_bits - parity_bits) // 8) * 8
-        model.embedder = ECCEmbedder.from_embedder(
-            model.embedder,
-            total_bits=total_bits,
-            message_bits=message_bits,
-            threshold=0.0,
-        )
-        model.detector = ECCExtractor.from_extractor(
-            model.detector,
-            total_bits=total_bits,
-            message_bits=message_bits,
-            threshold=0.0,
-        )
-
     model.img_size = STEGA_STAMP_IMAGE_WIDTH
     model.attenuation = STEGA_STAMP_ATTENUATION
     model.blender.scaling_i = STEGA_STAMP_SCALING_I
@@ -216,23 +225,6 @@ def get_revmark_videoseal(
     model = get_videoseal()
     model.embedder = REVMarkEmbedder(encoder_path)
     model.detector = REVMarkExtractor(decoder_path)
-
-    if ecc_mode:
-        total_bits = REVMARK_DEFAULT_MSG_BITS
-        parity_bits = 16
-        message_bits = ((total_bits - parity_bits) // 8) * 8
-        model.embedder = ECCEmbedder.from_embedder(
-            model.embedder,
-            total_bits=total_bits,
-            message_bits=message_bits,
-            threshold=0.5,
-        )
-        model.detector = ECCExtractor.from_extractor(
-            model.detector,
-            total_bits=total_bits,
-            message_bits=message_bits,
-            threshold=0.5,
-        )
 
     model.img_size = REVMARK_DEFAULT_WIDTH
     model.attenuation = REVMARK_ATTENUATION

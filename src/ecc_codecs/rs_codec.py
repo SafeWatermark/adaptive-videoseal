@@ -20,9 +20,10 @@ Example:
 import torch
 from reedsolo import RSCodec, ReedSolomonError
 from torch.nn import functional as F
+from ecc_codecs.base import ECCCodec
 
 
-class RSWatermarkCodec:
+class RSWatermarkCodec(ECCCodec):
     """Reed-Solomon codec for watermark error correction.
 
     Designed for fixed watermark capacity.
@@ -31,7 +32,9 @@ class RSWatermarkCodec:
     The codec can correct up to (parity_bytes // 2) byte errors.
     """
 
-    def __init__(self, total_bits, message_bits: int, threshold: float = 0.5):
+    def __init__(
+        self, total_bits, message_bits: int, threshold: float = 0.5, *args, **kwargs
+    ):
         """Initialize RS codec for watermark.
 
         Args:

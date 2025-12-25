@@ -25,6 +25,7 @@ from utils import (
     get_revmark_videoseal,
 )
 from scene_detectors.registry import detector_registry
+from ecc_codecs.registry import ecc_codec_registry
 import pandas as pd
 from datetime import datetime
 import argparse
@@ -242,10 +243,9 @@ def run_experiment(args):
     logger.info(f"Input dir: {input_dir}")
     logger.info(f"Output dir: {output_dir}")
 
-    model_kwargs = {"ecc_mode": args.ecc_mode}
     # Fixed model paths
     if args.model == "videoseal":
-        model = get_videoseal(**model_kwargs)
+        model = get_videoseal()
         model.blender.scaling_w = args.scaling_w
     elif args.model == "stega_stamp":
         if args.onnx_path is None:
@@ -256,7 +256,7 @@ def run_experiment(args):
                 "(original source: https://github.com/umd-huang-lab/WAVES/tree/main/decoders)."
             )
 
-        model = get_stega_stamp_videoseal(args.onnx_path, **model_kwargs)
+        model = get_stega_stamp_videoseal(args.onnx_path)
         if args.scaling_w != 1.0:
             logger.info(
                 f"'scaling_w' was set to {args.scaling_w}, but StegaStamp requires a 1:1 blend. "
@@ -273,7 +273,6 @@ def run_experiment(args):
         model = get_revmark_videoseal(
             os.path.join(revmark_path, "checkpoints/Encoder.pth"),
             os.path.join(revmark_path, "checkpoints/Decoder.pth"),
-            **model_kwargs,
         )
 
     model = model.eval().to(device)
@@ -282,6 +281,35 @@ def run_experiment(args):
     model.step_size = args.step_size
     model.video_mode = args.video_mode
     adaptive_model = AdaptiveVideoseal.from_videoseal(model)
+
+    if args.ecc_mode:
+        from utils import transform_ecc_videoseal
+        from models.stega_stamp import STEGA_STAMP_NUM_BITS
+        from models.revmark import REVMARK_DEFAULT_MSG_BITS
+
+        # TODO: Consider how to place the device of ecc codec(espcailly PolarWatermarkCodec as TensorFlow)
+        ecc_kwargs = {"message_bits": 64}  # Common default
+        if args.model == "videoseal":
+            ecc_kwargs["total_bits"] = model.embedder.msg_processor.nbits
+            ecc_kwargs["threshold"] = 0.0  # VideoSeal uses logits
+            # ecc_kwargs["input_type"] = "logits"
+        elif args.model == "stega_stamp":
+            ecc_kwargs["total_bits"] = STEGA_STAMP_NUM_BITS
+            ecc_kwargs["threshold"] = 0.0  # StegaStamp uses logits
+            # ecc_kwargs["input_type"] = "sigmoid"
+        elif args.model == "revmark":
+            ecc_kwargs["total_bits"] = REVMARK_DEFAULT_MSG_BITS
+            ecc_kwargs["threshold"] = 0.5  # RevMark uses sigmoid [0, 1]
+            # ecc_kwargs["input_type"] = "sigmoid"
+
+        ecc_codec = ecc_codec_registry.get(
+            args.ecc_codec, ecc_codec_registry["default"]
+        )(**ecc_kwargs)
+
+        model = transform_ecc_videoseal(model, ecc_codec=ecc_codec, **ecc_kwargs)
+        adaptive_model = transform_ecc_videoseal(
+            adaptive_model, ecc_codec=ecc_codec, **ecc_kwargs
+        )
     # --- Scene detector selection ---
     try:
         scene_detector = detector_registry[args.scene_detector](device=args.device)
@@ -338,7 +366,7 @@ def run_experiment(args):
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
 
-        if args.model == "revmark" or args.ecc_mode:
+        if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
             adaptive_bit_acc = (
                 bit_accuracy(
                     adaptive_soft_msgs, adaptive_msgs_ori, threshold=0.5
@@ -437,6 +465,13 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="If set, use error correction code(ecc) for embedding and detecting",
+    )
+    parser.add_argument(
+        "--ecc_codec",
+        type=str,
+        default="polar",
+        choices=["polar", "rs"],
+        help="If ecc_mode is set, ecc_codec needs. default: polar codec",
     )
     parser.add_argument(
         "--onnx_path",
