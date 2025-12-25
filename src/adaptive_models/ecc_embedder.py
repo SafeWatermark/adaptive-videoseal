@@ -1,7 +1,6 @@
 import torch
 from videoseal.models.embedder import Embedder
 from ecc_codecs.rs_codec import RSWatermarkCodec
-import numpy as np
 import copy
 
 
@@ -12,8 +11,17 @@ class ECCEmbedder(Embedder):
         model: Embedder,
         total_bits: int,
         message_bits: int,
-        threshold: float = 0,
+        threshold: float = 0.5,
     ) -> "ECCEmbedder":
+        """
+        Create an ECCEmbedder from an existing Embedder.
+
+        Args:
+            model: Base embedder to wrap
+            total_bits: Total watermark bits (codeword length after ECC)
+            message_bits: Number of message bits before ECC encoding
+            threshold: Decision threshold (passed to codec for consistency)
+        """
         new = copy.deepcopy(model)
         new.__class__ = cls
 
@@ -39,19 +47,18 @@ class ECCEmbedder(Embedder):
             msgs: (B, message_bits) tensor of message bits.
 
         Returns:
-            (B, self.total_bits) tensor with ECC-encoded bits.
+            (B, total_bits) tensor with ECC-encoded bits.
         """
-        device = msgs.device
         batch_size = msgs.shape[0]
         encoded_msgs = []
 
         for i in range(batch_size):
-            msg_np = msgs[i].detach().cpu().numpy().astype(np.uint8)
-            encoded = self.codec.encode(msg_np)
+            msg = msgs[i]
+            encoded = self.codec.encode(msg)
             encoded_msgs.append(encoded)
 
-        encoded_tensor = torch.from_numpy(np.stack(encoded_msgs)).to(device)
-        return encoded_tensor.float()
+        encoded_tensor = torch.stack(encoded_msgs, dim=0)
+        return encoded_tensor
 
     def _extract_args(self, args, kwargs):
         if len(args) >= 2:

@@ -1,5 +1,5 @@
-import numpy as np
 import pytest
+import torch
 
 from ecc_codecs.rs_codec import RSWatermarkCodec
 
@@ -55,18 +55,20 @@ class TestEncode:
 
     def test_encode_with_random_message(self, codec):
         """encode output length and format validation."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         result = codec.encode(message_bits)
 
         assert len(result) == 100
-        assert result.dtype == np.uint8
-        assert set(np.unique(result)).issubset({0, 1})
+        assert result.dtype == torch.uint8
+        assert set(torch.unique(result).tolist()).issubset({0, 1})
 
-        np.testing.assert_array_equal(result[codec.rs_bits :], 0)
+        torch.testing.assert_close(
+            result[codec.rs_bits :], torch.zeros(codec.reserved_bits, dtype=torch.uint8)
+        )
 
     def test_encode_wrong_length_raises(self, codec):
         """TC-B2: encode with wrong input length should raise ValueError."""
-        wrong_length = np.zeros(32, dtype=np.uint8)
+        wrong_length = torch.zeros(32, dtype=torch.uint8)
         with pytest.raises(ValueError, match="Expected 64 bits, got 32"):
             codec.encode(wrong_length)
 
@@ -76,15 +78,13 @@ class TestDecode:
     def codec(self):
         return RSWatermarkCodec(total_bits=100, message_bits=64, threshold=0.5)
 
-    def _corrupt_bytes(self, encoded: np.ndarray, n_bytes: int) -> np.ndarray:
+    def _corrupt_bytes(self, encoded: torch.Tensor, n_bytes: int) -> torch.Tensor:
         """Corrupt n_bytes worth of bits in the RS region (byte-level corruption)."""
-        corrupted = encoded.copy()
+        corrupted = encoded.clone()
 
         # RS region is the first rs_bits
         rs_bytes = len(encoded) // 8
-        byte_indices = np.random.choice(
-            rs_bytes, size=min(n_bytes, rs_bytes), replace=False
-        )
+        byte_indices = torch.randperm(rs_bytes)[: min(n_bytes, rs_bytes)]
 
         for byte_idx in byte_indices:
             # Flip all 8 bits in this byte
@@ -97,25 +97,25 @@ class TestDecode:
 
     def test_decode_no_error_roundtrip_random(self, codec):
         """TC-C1: No-error round-trip with random message."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
-        decoded, errors_corrected = codec.decode(encoded.astype(float))
+        decoded, errors_corrected = codec.decode(encoded.float())
 
-        np.testing.assert_array_equal(decoded, message_bits)
+        torch.testing.assert_close(decoded, message_bits)
         assert errors_corrected == 0
 
     def test_decode_correctable_errors(self, codec):
         """Errors within correction capacity should be corrected."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # Corrupt up to capacity bytes (capacity = 2 for this config)
         for n_errors in range(1, codec.error_correction_capacity + 1):
             corrupted = self._corrupt_bytes(encoded, n_errors)
-            decoded, errors_corrected = codec.decode(corrupted.astype(float))
+            decoded, errors_corrected = codec.decode(corrupted.float())
 
-            np.testing.assert_array_equal(
-                decoded, message_bits, err_msg=f"Failed with {n_errors} byte errors"
+            torch.testing.assert_close(
+                decoded, message_bits, msg=f"Failed with {n_errors} byte errors"
             )
             assert (
                 errors_corrected >= 0
@@ -123,13 +123,13 @@ class TestDecode:
 
     def test_decode_uncorrectable_errors(self, codec):
         """Errors exceeding correction capacity should fail."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # Corrupt more than capacity bytes
         n_errors = codec.error_correction_capacity + 1
         corrupted = self._corrupt_bytes(encoded, n_errors)
-        _, errors_corrected = codec.decode(corrupted.astype(float))
+        _, errors_corrected = codec.decode(corrupted.float())
 
         assert errors_corrected == -1, "Expected correction failure"
 
@@ -137,14 +137,14 @@ class TestDecode:
         """Test decode with higher error correction capacity."""
         # 16-bit message = 2 bytes, 10 parity bytes, capacity = 5
         codec = RSWatermarkCodec(total_bits=100, message_bits=16, threshold=0.5)
-        message_bits = np.random.randint(0, 2, size=16, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (16,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # Should correct up to 5 byte errors
         for n_errors in [1, 3, 5]:
             corrupted = self._corrupt_bytes(encoded, n_errors)
-            decoded, errors_corrected = codec.decode(corrupted.astype(float))
-            np.testing.assert_array_equal(decoded, message_bits)
+            decoded, errors_corrected = codec.decode(corrupted.float())
+            torch.testing.assert_close(decoded, message_bits)
             assert errors_corrected >= 0
 
 
@@ -154,14 +154,14 @@ class TestSoftInputAndConfidence:
         return RSWatermarkCodec(total_bits=100, message_bits=64, threshold=0.5)
 
     def _to_soft_values(
-        self, hard_bits: np.ndarray, low: float = 0.1, high: float = 0.9
-    ) -> np.ndarray:
+        self, hard_bits: torch.Tensor, low: float = 0.1, high: float = 0.9
+    ) -> torch.Tensor:
         """Convert hard bits to soft values (0 -> low, 1 -> high)."""
-        return np.where(hard_bits == 1, high, low).astype(float)
+        return torch.where(hard_bits == 1, high, low).float()
 
     def test_soft_input_hard_decision(self, codec):
         """TC-D1: Soft input with clear hard decision values."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # Convert to soft values (0 -> 0.1, 1 -> 0.9)
@@ -169,12 +169,12 @@ class TestSoftInputAndConfidence:
 
         decoded, errors = codec.decode(soft_watermark)
 
-        np.testing.assert_array_equal(decoded, message_bits)
+        torch.testing.assert_close(decoded, message_bits)
         assert errors == 0
 
     def test_confidence_return_and_range(self, codec):
         """Confidence return value range and consistency."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # High confidence soft values (far from threshold)
@@ -188,7 +188,7 @@ class TestSoftInputAndConfidence:
 
     def test_low_confidence_values(self, codec):
         """Test that values near threshold produce low confidence."""
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # Low confidence soft values (close to threshold)
@@ -203,7 +203,7 @@ class TestSoftInputAndConfidence:
         threshold = 0.5
         codec = RSWatermarkCodec(total_bits=100, message_bits=64, threshold=threshold)
 
-        message_bits = np.random.randint(0, 2, size=64, dtype=np.uint8)
+        message_bits = torch.randint(0, 2, (64,), dtype=torch.uint8)
         encoded = codec.encode(message_bits)
 
         # Values exactly at threshold edge
@@ -213,7 +213,7 @@ class TestSoftInputAndConfidence:
         decoded, errors_corrected = codec.decode(soft_watermark)
 
         # Should still decode correctly (0.49 < 0.5 -> 0, 0.51 > 0.5 -> 1)
-        np.testing.assert_array_equal(decoded, message_bits)
+        torch.testing.assert_close(decoded, message_bits)
         assert errors_corrected == 0
 
 
@@ -226,19 +226,19 @@ class TestBitsToBytes:
 
     def test_bits_to_bytes_roundtrip(self, codec):
         """Test _bits_to_bytes and _bytes_to_bits are inverses."""
-        original_bits = np.array(
-            [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1], dtype=np.uint8
+        original_bits = torch.tensor(
+            [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1], dtype=torch.uint8
         )
         bytes_result = codec._bits_to_bytes(original_bits)
         bits_result = codec._bytes_to_bits(bytes_result)
 
-        np.testing.assert_array_equal(bits_result, original_bits)
+        torch.testing.assert_close(bits_result, original_bits)
 
     def test_bits_to_bytes_msb_first(self, codec):
         """Verify MSB-first byte ordering."""
         # 10000000 = 128, 00000001 = 1
-        bits = np.array(
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], dtype=np.uint8
+        bits = torch.tensor(
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], dtype=torch.uint8
         )
         bytes_result = codec._bits_to_bytes(bits)
 

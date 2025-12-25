@@ -17,7 +17,7 @@ Example:
     - Can correct up to 5 byte errors
 """
 
-import numpy as np
+import torch
 from reedsolo import RSCodec, ReedSolomonError
 
 
@@ -86,7 +86,7 @@ class RSWatermarkCodec:
             "total_bits": self.TOTAL_BITS,
         }
 
-    def encode(self, message_bits: np.ndarray) -> np.ndarray:
+    def encode(self, message_bits: torch.Tensor) -> torch.Tensor:
         """Encode message bits with Reed-Solomon parity.
 
         Args:
@@ -107,24 +107,26 @@ class RSWatermarkCodec:
         message_bytes = self._bits_to_bytes(message_bits)
 
         # RS encode: message_bytes -> message_bytes + parity_bytes
-        encoded_bytes = self.rs.encode(message_bytes)
+        encoded_bytes: bytearray = self.rs.encode(message_bytes)
 
         # Convert back to bits (96 bits)
         encoded_bits = self._bytes_to_bits(bytes(encoded_bytes))
 
         # Create 100-bit output with reserved bits set to 0
-        result = np.zeros(self.total_bits, dtype=np.uint8)
+        result = torch.zeros(
+            self.total_bits, dtype=torch.uint8, device=message_bits.device
+        )
         result[: self.rs_bits] = encoded_bits
 
         return result
 
     def decode(
-        self, watermark_bits: np.ndarray, return_confidence: bool = False
-    ) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, float]:
+        self, watermark_bits: torch.Tensor, return_confidence: bool = False
+    ) -> tuple[torch.Tensor, int] | tuple[torch.Tensor, int, float]:
         """Decode watermark bits with RS error correction.
 
         Args:
-            watermark_bits: (100,) array of values (0-1 range, soft or hard)
+            watermark_bits: tensor of values (0-1 range, soft or hard)
             return_confidence: If True, also return confidence score
 
         Returns:
@@ -135,14 +137,15 @@ class RSWatermarkCodec:
         """
         # Take RS portion
         rs_bits = watermark_bits[: self.rs_bits]
+        device = watermark_bits.device
 
         # Compute confidence from soft values before hard decision
         if return_confidence:
             # Confidence = how far from 0.5 the values are (average)
-            confidence = float(np.mean(np.abs(rs_bits - self.threshold) * 2))
+            confidence = torch.mean(torch.abs(rs_bits - self.threshold) * 2).item()
 
         # Convert to hard decisions
-        hard_bits = (np.asarray(rs_bits) > self.threshold).astype(np.uint8)
+        hard_bits = rs_bits > self.threshold
 
         # Convert bits to bytes
         encoded_bytes = self._bits_to_bytes(hard_bits)
@@ -158,27 +161,39 @@ class RSWatermarkCodec:
             errors_corrected = -1  # Indicates correction failure
 
         # Convert back to bits
-        message_bits = self._bytes_to_bits(message_bytes)
+        message_bits = self._bytes_to_bits(message_bytes, device)
 
         if return_confidence:
             return message_bits, errors_corrected, confidence
         return message_bits, errors_corrected
 
-    def _bits_to_bytes(self, bits: np.ndarray) -> bytes:
-        """Convert bit array to bytes (MSB first)."""
-        bits = np.asarray(bits, dtype=np.uint8)
-        n_bytes = len(bits) // 8
-        result = []
-        for i in range(n_bytes):
-            byte_bits = bits[i * 8 : (i + 1) * 8]
-            byte_val = sum(int(b) << (7 - j) for j, b in enumerate(byte_bits))
-            result.append(byte_val)
-        return bytes(result)
+    def _bits_to_bytes(self, bits: torch.Tensor) -> bytes:
+        """Convert bit tensor to bytes (MSB first)."""
 
-    def _bytes_to_bits(self, data: bytes) -> np.ndarray:
-        """Convert bytes to bit array (MSB first)."""
-        bits = []
-        for byte in data:
-            for i in range(7, -1, -1):
-                bits.append((byte >> i) & 1)
-        return np.array(bits, dtype=np.uint8)
+        # Ensure uint8 on CPU (bytes() expects CPU-accessible data)
+        bits = bits.to(dtype=torch.uint8, device="cpu").flatten()
+
+        n_bytes = bits.numel() // 8
+        if n_bytes == 0:
+            return b""
+
+        bits = bits[: n_bytes * 8].view(n_bytes, 8)
+        weights = 1 << torch.arange(7, -1, -1, dtype=torch.uint8)
+
+        byte_vals = (bits * weights).sum(dim=1)  # uint8
+        return bytes(byte_vals.tolist())
+
+    def _bytes_to_bits(
+        self, data: bytes, device: torch.device = torch.device("cpu")
+    ) -> torch.Tensor:
+        """Convert bytes to bit tensor (MSB first)."""
+        byte_tensor = torch.frombuffer(data, dtype=torch.uint8).to(device)
+
+        # Bit positions MSB -> LSB: 7..0
+        shifts = torch.arange(7, -1, -1, dtype=torch.uint8, device=device)
+
+        # Extract bits: shape (n_bytes, 8)
+        bits = ((byte_tensor[:, None] >> shifts[None, :]) & 1).to(torch.uint8)
+
+        # Flatten to 1D: (n_bytes*8,)
+        return bits.reshape(-1)
