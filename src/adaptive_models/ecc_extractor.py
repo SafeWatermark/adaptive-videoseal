@@ -49,17 +49,7 @@ class ECCExtractor(Extractor):
             decoded_msgs: (B, message_bits) tensor of corrected message bits.
             errors_list: List of error counts per batch item.
         """
-        batch_size = raw_bits.shape[0]
-        decoded_msgs = []
-        errors_list = []
-
-        for i in range(batch_size):
-            bits = raw_bits[i]
-            msg_bits, errors = self.codec.decode(bits)
-            decoded_msgs.append(msg_bits)
-            errors_list.append(errors)
-
-        decoded_tensor = torch.stack(decoded_msgs, dim=0)
+        decoded_tensor, errors_list = self.codec.decode(raw_bits)
         return decoded_tensor, errors_list
 
     def forward(self, imgs: torch.Tensor) -> torch.Tensor:

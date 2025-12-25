@@ -49,15 +49,7 @@ class ECCEmbedder(Embedder):
         Returns:
             (B, total_bits) tensor with ECC-encoded bits.
         """
-        batch_size = msgs.shape[0]
-        encoded_msgs = []
-
-        for i in range(batch_size):
-            msg = msgs[i]
-            encoded = self.codec.encode(msg)
-            encoded_msgs.append(encoded)
-
-        encoded_tensor = torch.stack(encoded_msgs, dim=0)
+        encoded_tensor = self.codec.encode(msgs)
         return encoded_tensor
 
     def _extract_args(self, args, kwargs):
