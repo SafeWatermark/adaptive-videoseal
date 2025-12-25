@@ -84,10 +84,16 @@ Adaptive VideoSeal 프로젝트는 **VideoSeal** 모델 외에도 **StegaStamp**
 
 #### **ECC Mode (오류 정정)**
 
-`--ecc_mode` 플래그를 사용하면 Reed-Solomon 오류 정정 코드를 워터마크 메시지에 적용합니다. 추출 시 비트 오류에 대한 강건성이 향상됩니다.
+`--ecc_mode` 플래그를 사용하면 오류 정정 코드를 워터마크 메시지에 적용합니다. 추출 시 비트 오류에 대한 강건성이 향상됩니다.
+
+| ECC Mode | Description |
+| -------- | ----------- |
+| **rs** | Reed-Solomon 코드. 설정 가능한 중복도를 가진 전통적인 대수적 ECC. |
+| **polar** | Sionna 기반 5G NR Polar 코드. SC, SCL, BP 디코더를 지원하며 soft-input 디코딩으로 노이즈에 강건함. |
 
 ```bash
-uv run python src/poc.py --model videoseal --ecc_mode ...
+uv run python src/poc.py --model videoseal --ecc_mode rs ...    # Reed-Solomon
+uv run python src/poc.py --model videoseal --ecc_mode polar ... # Polar code
 ```
 
 ---

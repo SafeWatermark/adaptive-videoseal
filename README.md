@@ -79,10 +79,16 @@ The **Adaptive VideoSeal** project supports not only the **VideoSeal** model but
 
 #### **ECC Mode (Error Correction)**
 
-Use the `--ecc_mode` flag to enable Reed-Solomon error correction for watermark messages. This improves robustness against bit errors during extraction.
+Use the `--ecc_mode` flag to enable error correction for watermark messages. This improves robustness against bit errors during extraction.
+
+| ECC Mode | Description |
+| -------- | ----------- |
+| **rs** | Reed-Solomon code. Classic algebraic ECC with configurable redundancy. |
+| **polar** | 5G NR Polar code via Sionna. Supports SC, SCL, BP decoders with soft-input decoding for better noise resilience. |
 
 ```bash
-uv run python src/poc.py --model videoseal --ecc_mode ...
+uv run python src/poc.py --model videoseal --ecc_mode rs ...    # Reed-Solomon
+uv run python src/poc.py --model videoseal --ecc_mode polar ... # Polar code
 ```
 
 ---
