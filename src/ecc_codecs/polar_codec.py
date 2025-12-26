@@ -9,8 +9,9 @@ Polar Code Configuration:
 - GPU/CPU acceleration via TensorFlow
 
 Input Conventions:
+- Binary output (0 or 1): (e.g., StegaStamp)
 - Sigmoid output [0, 1]: probability that bit = 1 (e.g., RevMark)
-- Logits (unbounded): raw neural network output (e.g., VideoSeal, StegaStamp)
+- Logits (unbounded): raw neural network output (e.g., VideoSeal)
   - Positive logit → bit more likely to be 1
   - Negative logit → bit more likely to be 0
 
@@ -20,19 +21,15 @@ specify via the `input_type` parameter in decode().
 Performance Considerations:
 - SHORT CODEWORDS & SEVERE BIT ERRORS: Performance degrades significantly when
   bit error rate is high relative to the error correction capacity. With short
-  message lengths (e.g., 32-64 bits), even a few corrupted bits can exceed the
+  bit lengths (e.g., 32-64 bits), even a few corrupted bits can exceed the
   correction threshold, causing complete decoding failure.
 
 - REVMARK "per_block" MODE: When using REVMark with per_block detection mode,
-  each 8-frame block produces only ONE decoded message. If this single decoding
-  fails due to compression artifacts or noise, there's no temporal redundancy
-  to recover from. This makes ECC less effective compared to per_frame mode.
+  each 8-frame block produces only once. This can makes damage REVMark's
+  detection performance
 
-    - RECOMMENDED APPROACH: Use "per_frame" mode with ECCExtractor.extract_soft_bits()
-    to get soft values from each frame, average them temporally, then call
-    decode_averaged_bits() once. This leverages temporal redundancy BEFORE ECC
-    decoding, providing much better noise resilience than per-frame ECC decoding
-    followed by majority voting on hard decisions.
+    - RECOMMENDED APPROACH: Use "per_frame" mode with ECCExtractor to enhance
+    REVMark's Detection performance.
 
 - ERROR CORRECTION CAPACITY: 5G Polar codes with SCL decoding can typically
   correct ~10-15% bit errors depending on code rate. Beyond this threshold,

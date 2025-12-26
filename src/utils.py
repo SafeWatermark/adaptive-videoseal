@@ -102,11 +102,7 @@ def transform_ecc_videoseal(
         model: VideoSeal or AdaptiveVideoseal model to transform
         total_bits: Total watermark bits (codeword length)
         message_bits: Number of message bits before ECC (default: 64)
-        threshold: Decision threshold for soft or hard values (default: 0.5 for logits, 0.5 for sigmoid)
-        input_type: Input type for Polar decoder:
-            - "auto": Auto-detect based on value range
-            - "sigmoid": Values in [0, 1] (e.g., RevMark)
-            - "logits": Unbounded values (e.g., VideoSeal 1.0)
+        threshold: Decision threshold for soft or hard values (default: 0 for logits, 0.5 for sigmoid)
 
     Returns:
         Transformed model with ECC support
