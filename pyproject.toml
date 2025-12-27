@@ -35,6 +35,7 @@ dependencies = [
     "albumentations>=2.0.8",
     "onnxruntime>=1.23.2",
     "onnx2torch>=1.5.15",
+    "pydantic-settings>=2.12.0",
 ]
 
 
