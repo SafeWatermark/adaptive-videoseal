@@ -288,28 +288,23 @@ def run_experiment(args):
         from models.revmark import REVMARK_DEFAULT_MSG_BITS
 
         # TODO: Consider how to place the device of ecc codec(espcailly PolarWatermarkCodec as TensorFlow)
-        ecc_kwargs = {"message_bits": 64}  # Common default
+        ecc_kwargs = {"message_bits": 32}  # Common default
         if args.model == "videoseal":
             ecc_kwargs["total_bits"] = model.embedder.msg_processor.nbits
             ecc_kwargs["threshold"] = 0.0  # VideoSeal uses logits
-            # ecc_kwargs["input_type"] = "logits"
         elif args.model == "stega_stamp":
             ecc_kwargs["total_bits"] = STEGA_STAMP_NUM_BITS
-            ecc_kwargs["threshold"] = 0.0  # StegaStamp uses logits
-            # ecc_kwargs["input_type"] = "sigmoid"
+            ecc_kwargs["threshold"] = 0.0  # StegaStamp uses binary
         elif args.model == "revmark":
             ecc_kwargs["total_bits"] = REVMARK_DEFAULT_MSG_BITS
             ecc_kwargs["threshold"] = 0.5  # RevMark uses sigmoid [0, 1]
-            # ecc_kwargs["input_type"] = "sigmoid"
 
         ecc_codec = ecc_codec_registry.get(
             args.ecc_codec, ecc_codec_registry["default"]
         )(**ecc_kwargs)
 
-        model = transform_ecc_videoseal(model, ecc_codec=ecc_codec, **ecc_kwargs)
-        adaptive_model = transform_ecc_videoseal(
-            adaptive_model, ecc_codec=ecc_codec, **ecc_kwargs
-        )
+        model = transform_ecc_videoseal(model, ecc_codec=ecc_codec)
+        adaptive_model = transform_ecc_videoseal(adaptive_model, ecc_codec=ecc_codec)
     # --- Scene detector selection ---
     try:
         scene_detector = detector_registry[args.scene_detector](device=args.device)
@@ -365,6 +360,13 @@ def run_experiment(args):
             model, str(output_path), num_frames_for_extraction, chunk_size
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
+        if args.ecc_mode:
+            # original message(ECC Encoded) -> Decoder -> message bits
+            adaptive_ecc_decoded, _ = ecc_codec.decode(adaptive_msgs_ori)
+            adaptive_msgs_ori = adaptive_ecc_decoded.squeeze()
+
+            ecc_decoded, _ = ecc_codec.decode(msgs_ori)
+            msgs_ori = ecc_decoded.squeeze()
 
         if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
             adaptive_bit_acc = (
@@ -473,6 +475,15 @@ if __name__ == "__main__":
         choices=["polar", "rs"],
         help="If ecc_mode is set, ecc_codec needs. default: polar codec",
     )
+    # parser.add_argument("--mac_mode", action="store_true",
+    #                 help="Enable MAC authentication (requires MAC_SECRET_KEY env var)")
+    # parser.add_argument("--mac_algorithm", type=str, default="hmac",
+    #                     choices=["hmac"],
+    #                     help="MAC algorithm to use")
+    # parser.add_argument("--mac_tag_bits", type=int, default=32,
+    #                     help="MAC tag size in bits (default: 32, forgery prob ~2^-32)")
+    # parser.add_argument("--message_bits", type=int, default=32,
+    #                     help="Number of message bits (before MAC/ECC)")
     parser.add_argument(
         "--onnx_path",
         type=str,
