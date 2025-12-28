@@ -24,10 +24,11 @@ from models.revmark import (
 )
 from videoseal.models import Videoseal
 
-from adaptive_models.ecc_embedder import ECCEmbedder
-from adaptive_models.ecc_extractor import ECCExtractor
 from adaptive_models.adaptive_videoseal import AdaptiveVideoseal
 from ecc_codecs.base import ECCCodec
+from msg_processors.layered_msg_processor import LayeredMsgProcessor
+from msg_processors.ecc_layer import ECCMsgProcessor
+from hooks.ecc_hooks import ecc_forward_hook
 
 
 def setup_seed(seed: int):
@@ -80,7 +81,7 @@ def select_device(device_choice: str):
     return device
 
 
-def get_videoseal(ecc_mode: bool = False) -> Videoseal:
+def get_videoseal() -> Videoseal:
     current_path = Path(__file__).resolve().parent
     model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
     return model
@@ -89,10 +90,6 @@ def get_videoseal(ecc_mode: bool = False) -> Videoseal:
 def transform_ecc_videoseal(
     model: Videoseal | AdaptiveVideoseal,
     ecc_codec: ECCCodec,
-    total_bits: int,
-    message_bits: int = 64,
-    threshold: float = 0.5,
-    # input_type: str = "auto",
 ) -> Videoseal | AdaptiveVideoseal:
     """
     TensorFlow layer can't be copied properly. So if you need PolarWatermarkCodec, recommend to use it.
@@ -100,28 +97,18 @@ def transform_ecc_videoseal(
 
     Args:
         model: VideoSeal or AdaptiveVideoseal model to transform
-        total_bits: Total watermark bits (codeword length)
-        message_bits: Number of message bits before ECC (default: 64)
-        threshold: Decision threshold for soft or hard values (default: 0 for logits, 0.5 for sigmoid)
+        ecc_codec: ECC Codec to encode message or decode payload
 
     Returns:
         Transformed model with ECC support
     """
-    model.embedder = ECCEmbedder.from_embedder(
-        model.embedder,
-        ecc_codec=ecc_codec,
-        total_bits=total_bits,
-        message_bits=message_bits,
-        threshold=threshold,
+    msg_processor = LayeredMsgProcessor(
+        nbits=ecc_codec.message_bits, layers=[ECCMsgProcessor(ecc_codec)]
     )
-    model.detector = ECCExtractor.from_extractor(
-        model.detector,
-        ecc_codec=ecc_codec,
-        total_bits=total_bits,
-        message_bits=message_bits,
-        threshold=threshold,
-        # input_type=input_type,
-    )
+    model.embedder.msg_processor = msg_processor
+    model.detector.register_forward_hook(ecc_forward_hook)
+    setattr(model.detector, "ecc_codec", ecc_codec)
+
     return model
 
 
@@ -165,7 +152,7 @@ def patch_ffmpeg_path(
         logging.info("[patch_ffmpeg_path] Restored original subprocess.run")
 
 
-def get_stega_stamp_videoseal(onnx_path: str, ecc_mode: bool = False) -> Videoseal:
+def get_stega_stamp_videoseal(onnx_path: str) -> Videoseal:
     """
     Configure a VideoSeal model to use StegaStamp for watermark embedding and extraction.
 
@@ -188,7 +175,9 @@ def get_stega_stamp_videoseal(onnx_path: str, ecc_mode: bool = False) -> Videose
     with StegaStamp modules, and applies the necessary configuration.
     """
     model = get_videoseal()
-    model.embedder = StegaStampEmbedder(onnx_path)
+    model.embedder = StegaStampEmbedder(
+        onnx_path, msg_processor=model.embedder.msg_processor
+    )
     model.detector = StegaStampExtractor(onnx_path)
 
     model.img_size = STEGA_STAMP_IMAGE_WIDTH
@@ -199,7 +188,8 @@ def get_stega_stamp_videoseal(onnx_path: str, ecc_mode: bool = False) -> Videose
 
 
 def get_revmark_videoseal(
-    encoder_path: str, decoder_path: str, ecc_mode: bool = False
+    encoder_path: str,
+    decoder_path: str,
 ) -> Videoseal:
     """
     Configure a VideoSeal model to use REVMark for watermark embedding and extraction.
@@ -219,7 +209,9 @@ def get_revmark_videoseal(
         VideoSeal model configured for REVMark embedding and extraction.
     """
     model = get_videoseal()
-    model.embedder = REVMarkEmbedder(encoder_path)
+    model.embedder = REVMarkEmbedder(
+        encoder_path, msg_processor=model.embedder.msg_processor
+    )
     model.detector = REVMarkExtractor(decoder_path)
 
     model.img_size = REVMARK_DEFAULT_WIDTH
