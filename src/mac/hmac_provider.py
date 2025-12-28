@@ -15,6 +15,8 @@ class HMACProvider(MACProvider):
         self.config = config
         self.hmac_tag = self._compute_truncated_hmac_tag()
 
+        self.verification_results: list = []
+
         if self.tag_bits <= 0:
             raise ValueError("tag_bits must be positive")
 
@@ -26,6 +28,9 @@ class HMACProvider(MACProvider):
                 f"tag_bits must be less than or equal to the MAC secret key size in bits. "
                 f"tag_bits={tag_bits}, MAC_SECRET_KEY_bits={max_tag_bits}"
             )
+
+    def clear_results(self):
+        self.verification_results = []
 
     def build_authenticated_payload_bits(
         self, message_bits: torch.Tensor
@@ -47,7 +52,6 @@ class HMACProvider(MACProvider):
                 f"Expected {self.message_bits} bits, got {message_bits.size(-1)}"
             )
 
-        self.hmac_tag = self._compute_truncated_hmac_tag()  # (tag_bits,)
         if self.hmac_tag.size(0) != self.tag_bits:
             raise RuntimeError("Tag size mismatch (internal error)")
 
@@ -129,7 +133,7 @@ class HMACProvider(MACProvider):
             return torch.zeros(
                 tag_bits.size(0), dtype=torch.bool, device=payload_bits.device
             )
-
+        # TODO: Threshold if soft message
         diff = (tag_bits.to(torch.uint8) ^ expected_tag.to(torch.uint8)).sum(
             dim=-1
         )  # [B]
