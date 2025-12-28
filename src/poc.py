@@ -31,6 +31,13 @@ from datetime import datetime
 import argparse
 from scipy import stats
 import logging
+from utils import (
+    transform_ecc_videoseal,
+    transform_authenticated_ecc_videoseal,
+    transform_authenticated_videoseal,
+)
+from models.stega_stamp import STEGA_STAMP_NUM_BITS
+from models.revmark import REVMARK_DEFAULT_MSG_BITS
 
 
 def get_video_info(input_path):
@@ -282,13 +289,70 @@ def run_experiment(args):
     model.video_mode = args.video_mode
     adaptive_model = AdaptiveVideoseal.from_videoseal(model)
 
-    if args.ecc_mode:
-        from utils import transform_ecc_videoseal
-        from models.stega_stamp import STEGA_STAMP_NUM_BITS
-        from models.revmark import REVMARK_DEFAULT_MSG_BITS
+    from mac.registry import mac_provider_registry
+    from mac.configs import mac_settings
 
+    if args.mac_mode:
+        mac_provider_kwargs = {
+            "message_bits": args.message_bits,
+            "tag_bits": args.mac_tag_bits,
+            "config": mac_settings,
+        }
+
+        if args.model == "videoseal":
+            total_bits = model.embedder.msg_processor.nbits
+            threshold = 0.0  # VideoSeal uses logits
+        elif args.model == "stega_stamp":
+            total_bits = STEGA_STAMP_NUM_BITS
+            threshold = 0.0  # StegaStamp uses binary
+        elif args.model == "revmark":
+            total_bits = REVMARK_DEFAULT_MSG_BITS
+            threshold = 0.5  # RevMark uses sigmoi
+        if args.ecc_mode:
+            # mac_provider & adaptive_mac_provider are same configuration each other, but to store the verification results, instantiate different object
+            # TODO: Consider how to store verification results
+            mac_provider = mac_provider_registry.get(
+                args.mac_algorithm, mac_provider_registry["default"]
+            )(**mac_provider_kwargs)
+            adaptive_mac_provider = mac_provider_registry.get(
+                args.mac_algorithm, mac_provider_registry["default"]
+            )(**mac_provider_kwargs)
+
+            ecc_kwargs = {
+                "message_bits": mac_provider_kwargs.get("message_bits", 0)
+                + mac_provider_kwargs.get("tag_bits", 0),
+                "total_bits": total_bits,
+                "threshold": threshold,
+            }
+            ecc_codec = ecc_codec_registry.get(
+                args.ecc_codec, ecc_codec_registry["default"]
+            )(**ecc_kwargs)
+            model = transform_authenticated_ecc_videoseal(
+                model, ecc_codec, mac_provider
+            )
+            adaptive_model = transform_authenticated_ecc_videoseal(
+                adaptive_model, ecc_codec, adaptive_mac_provider
+            )
+        else:
+            raise ValueError("not developed yet properly.")
+            mac_provider_kwargs["tag_bits"] = (
+                total_bits - args.message_bits
+            )  # if ecc mode is False: mac encoding should fill the fixed size msg tensor
+            mac_provider = mac_provider_registry.get(
+                args.mac_algorithm, mac_provider_registry["default"]
+            )(**mac_provider_kwargs)
+            adaptive_mac_provider = mac_provider_registry.get(
+                args.mac_algorithm, mac_provider_registry["default"]
+            )(**mac_provider_kwargs)
+
+            model = transform_authenticated_videoseal(model, mac_provider)
+            adaptive_model = transform_authenticated_videoseal(
+                adaptive_model, adaptive_mac_provider
+            )
+
+    elif args.ecc_mode:
         # TODO: Consider how to place the device of ecc codec(espcailly PolarWatermarkCodec as TensorFlow)
-        ecc_kwargs = {"message_bits": 32}  # Common default
+        ecc_kwargs = {"message_bits": args.message_bits}  # Common default
         if args.model == "videoseal":
             ecc_kwargs["total_bits"] = model.embedder.msg_processor.nbits
             ecc_kwargs["threshold"] = 0.0  # VideoSeal uses logits
@@ -368,6 +432,38 @@ def run_experiment(args):
             ecc_decoded, _ = ecc_codec.decode(msgs_ori)
             msgs_ori = ecc_decoded.squeeze()
 
+        # TODO: Consider - averaged(aggregated) message verification
+        # calculate each of frames(images) verified
+        if args.mac_mode:
+            adaptive_verification_results = adaptive_mac_provider.verification_results
+            adaptive_true_positive_ratio = sum(adaptive_verification_results) / len(
+                adaptive_verification_results
+            )
+            logger.info(
+                f"[Authentication - Adaptive Videoseal] False Negative ratio: {1 - adaptive_true_positive_ratio}"
+            )
+
+            # original message(MAC tag attached) -> split -> message_bits
+            adaptive_msgs_ori, _ = adaptive_mac_provider.split_payload_bits(
+                adaptive_msgs_ori.unsqueeze(0)
+            )
+            adaptive_msgs_ori = adaptive_msgs_ori.squeeze(0)
+
+            adaptive_mac_provider.clear_results()
+
+            verification_results = mac_provider.verification_results
+            true_positive_ratio = sum(verification_results) / len(verification_results)
+            logger.info(
+                f"[Authentication - Videoseal] False Negative ratio: {1 - true_positive_ratio}"
+            )
+
+            # original message(MAC tag attached) -> split -> message_bits
+            msgs_ori, _ = mac_provider.split_payload_bits(msgs_ori.unsqueeze(0))
+            msgs_ori = msgs_ori.squeeze(0)
+
+            mac_provider.clear_results()
+
+        # calculate averaged soft message accuracy
         if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
             adaptive_bit_acc = (
                 bit_accuracy(
@@ -475,15 +571,30 @@ if __name__ == "__main__":
         choices=["polar", "rs"],
         help="If ecc_mode is set, ecc_codec needs. default: polar codec",
     )
-    # parser.add_argument("--mac_mode", action="store_true",
-    #                 help="Enable MAC authentication (requires MAC_SECRET_KEY env var)")
-    # parser.add_argument("--mac_algorithm", type=str, default="hmac",
-    #                     choices=["hmac"],
-    #                     help="MAC algorithm to use")
-    # parser.add_argument("--mac_tag_bits", type=int, default=32,
-    #                     help="MAC tag size in bits (default: 32, forgery prob ~2^-32)")
-    # parser.add_argument("--message_bits", type=int, default=32,
-    #                     help="Number of message bits (before MAC/ECC)")
+    parser.add_argument(
+        "--mac_mode",
+        action="store_true",
+        help="Enable MAC authentication (requires MAC_SECRET_KEY env var)",
+    )
+    parser.add_argument(
+        "--mac_algorithm",
+        type=str,
+        default="hmac",
+        choices=["hmac"],
+        help="MAC algorithm to use",
+    )
+    parser.add_argument(
+        "--mac_tag_bits",
+        type=int,
+        default=32,
+        help="MAC tag size in bits (default: 32, forgery prob ~2^-32)",
+    )
+    parser.add_argument(
+        "--message_bits",
+        type=int,
+        default=32,
+        help="Number of message bits (before MAC/ECC)",
+    )
     parser.add_argument(
         "--onnx_path",
         type=str,
