@@ -334,7 +334,6 @@ def run_experiment(args):
                 adaptive_model, ecc_codec, adaptive_mac_provider
             )
         else:
-            raise ValueError("not developed yet properly.")
             mac_provider_kwargs["tag_bits"] = (
                 total_bits - args.message_bits
             )  # if ecc mode is False: mac encoding should fill the fixed size msg tensor
@@ -426,11 +425,17 @@ def run_experiment(args):
         logger.info("✅ [VideoSeal Model] Detection completed.")
         if args.ecc_mode:
             # original message(ECC Encoded) -> Decoder -> message bits
+            if adaptive_msgs_ori.ndim == 1:
+                adaptive_msgs_ori = adaptive_msgs_ori.unsqueeze(0)
             adaptive_ecc_decoded, _ = ecc_codec.decode(adaptive_msgs_ori)
-            adaptive_msgs_ori = adaptive_ecc_decoded.squeeze()
+            adaptive_msgs_ori = (
+                adaptive_ecc_decoded.squeeze()
+            )  # (1, message_bits) -> (message_bits,)
 
+            if msgs_ori.ndim == 1:
+                msgs_ori = msgs_ori.unsqueeze(0)
             ecc_decoded, _ = ecc_codec.decode(msgs_ori)
-            msgs_ori = ecc_decoded.squeeze()
+            msgs_ori = ecc_decoded.squeeze()  # (1, message_bits) -> (message_bits,)
 
         # TODO: Consider - averaged(aggregated) message verification
         # calculate each of frames(images) verified
@@ -442,12 +447,15 @@ def run_experiment(args):
             logger.info(
                 f"[Authentication - Adaptive Videoseal] False Negative ratio: {1 - adaptive_true_positive_ratio}"
             )
-
+            if adaptive_msgs_ori.ndim == 1:
+                adaptive_msgs_ori = adaptive_msgs_ori.unsqueeze(0)
             # original message(MAC tag attached) -> split -> message_bits
             adaptive_msgs_ori, _ = adaptive_mac_provider.split_payload_bits(
-                adaptive_msgs_ori.unsqueeze(0)
+                adaptive_msgs_ori
             )
-            adaptive_msgs_ori = adaptive_msgs_ori.squeeze(0)
+            adaptive_msgs_ori = adaptive_msgs_ori.squeeze(
+                0
+            )  # (1, message_bits) -> (message_bits)
 
             adaptive_mac_provider.clear_results()
 
@@ -458,13 +466,20 @@ def run_experiment(args):
             )
 
             # original message(MAC tag attached) -> split -> message_bits
-            msgs_ori, _ = mac_provider.split_payload_bits(msgs_ori.unsqueeze(0))
+            if msgs_ori.ndim == 1:
+                msgs_ori = msgs_ori.unsqueeze(0)
+            msgs_ori, _ = mac_provider.split_payload_bits(msgs_ori)
             msgs_ori = msgs_ori.squeeze(0)
 
             mac_provider.clear_results()
 
         # calculate averaged soft message accuracy
-        if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
+        if (
+            args.model == "revmark"
+            or args.model == "stega_stamp"
+            or args.ecc_mode
+            or args.mac_mode
+        ):
             adaptive_bit_acc = (
                 bit_accuracy(
                     adaptive_soft_msgs, adaptive_msgs_ori, threshold=0.5
