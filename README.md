@@ -87,11 +87,27 @@ Use the `--ecc_mode` flag to enable error correction for watermark messages. Thi
 | **polar** | 5G NR Polar code via Sionna. Supports SC, SCL, BP decoders with soft-input decoding for better noise resilience. |
 
 ```bash
-uv run python src/poc.py --model videoseal --ecc_mode rs ...    # Reed-Solomon
-uv run python src/poc.py --model videoseal --ecc_mode polar ... # Polar code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=polar ...    # Polar code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ... # Rees-Solmon code
 ```
 
----
+
+#### **MAC Mode (Message Authentication Code)**
+Use the `--mac_mode` flag to **authenticate watermark messages**. This verifies whether a **decoded watermark** was produced by the watermark model or forged by an attacker.
+
+* Improves resistance to spoofing/forgery
+* May increase **false negatives** (a valid watermark may be rejected)
+* Recommended to use **ECC mode** together to reduce detection failures
+
+
+| MAC Mode | Description |
+| -------- | ----------- |
+| **hmac** | uses a secret key + a cryptographic hash function (e.g., SHA-256) to generate an authentication tag for the watermark message. |
+
+```bash
+uv run python src/poc.py --model videoseal --mac_mode --mac_algorithm=hmac ... # hmac
+```
+
 
 ### 3.2 Adaptive Watermarking Experiment
 
