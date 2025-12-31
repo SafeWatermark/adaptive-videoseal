@@ -98,6 +98,9 @@ def transform_ecc_videoseal(
     TensorFlow layer can't be copied properly. So if you need PolarWatermarkCodec, recommend to use it.
     Transform a VideoSeal model to use ECC encoding/decoding.
 
+    Embed: message_bits → [ECC encode] → embed into image/video
+    Extract: extract from image/video → [ECC decode] → message_bits
+
     Args:
         model: VideoSeal or AdaptiveVideoseal model to transform
         ecc_codec: ECC Codec to encode message or decode payload
@@ -119,6 +122,18 @@ def transform_authenticated_videoseal(
     model: Videoseal | AdaptiveVideoseal,
     mac_provider: MACProvider,
 ):
+    """
+
+    Embed: message_bits → [MAC tag attach] → embed into image/video
+    Extract: extract from image/video → [MAC tag dettach] → message_bits
+
+    Args:
+        model: VideoSeal or AdaptiveVideoseal model to transform
+        mac_provider: MacProvider to encode (message | MAC) or decode payload( message | MAC -> message, MAC)
+
+    Returns:
+        Transformed model with ECC support
+    """
     msg_processor = LayeredMsgProcessor(
         nbits=mac_provider.message_bits, layers=[MACMsgProcessor(mac_provider)]
     )
@@ -132,6 +147,18 @@ def transform_authenticated_videoseal(
 def transform_authenticated_ecc_videoseal(
     model: Videoseal | AdaptiveVideoseal, ecc_codec: ECCCodec, mac_provider: MACProvider
 ):
+    """
+    Embed: message_bits → [MAC: append tag] → [ECC encode] → embed
+    Extract: extract → [ECC decode] → [MAC: verify & strip tag] → message_bits + verification_status
+
+    Args:
+        model: VideoSeal or AdaptiveVideoseal model to transform
+        ecc_codec: ECC Codec to encode message or decode payload
+        mac_provider: MacProvider to encode (message | MAC) or decode payload( message | MAC -> message, MAC)
+
+    Returns:
+        Transformed model with ECC & MAC support
+    """
     msg_processor = LayeredMsgProcessor(
         nbits=mac_provider.message_bits,
         layers=[MACMsgProcessor(mac_provider), ECCMsgProcessor(ecc_codec)],
