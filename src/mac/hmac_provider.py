@@ -5,6 +5,7 @@ import torch
 from mac.configs import mac_settings
 from pydantic_settings import BaseSettings
 from typing import Literal
+from schemas.converters import ValueConverter
 
 
 class HMACProvider(MACProvider):
@@ -23,8 +24,6 @@ class HMACProvider(MACProvider):
 
         BYTE = 8
         max_tag_bits = len(config.MAC_SECRET_KEY) * BYTE
-
-        self._sigmoid_range_margin = 0.05  # Margin for sigmoid detection
 
         if tag_bits > max_tag_bits:
             raise ValueError(
@@ -110,7 +109,7 @@ class HMACProvider(MACProvider):
     def verify_tag(
         self,
         payload_bits: torch.Tensor,
-        input_type: Literal["auto", "sigmoid", "logits"] = "auto",
+        input_type: Literal["auto", "sigmoid", "logits", "binary"] = "auto",
     ) -> torch.Tensor:
         """
         Verify payload authenticity:
@@ -120,6 +119,7 @@ class HMACProvider(MACProvider):
 
         Args:
             payload_bits (torch.Tensor): shape [B, message_bits + tag_bits]
+            input_type: Input interpretation mode ("auto", "sigmoid", "logits", "binary")
 
         Returns:
             torch.Tensor: shape [B], dtype=torch.bool
@@ -127,15 +127,11 @@ class HMACProvider(MACProvider):
 
         _, tag_bits = self.split_payload_bits(payload_bits)
 
-        detected_type = self._detect_input_type(tag_bits, input_type)
+        # Detect input type using unified ValueConverter
+        detected_type = ValueConverter.detect_value_type(tag_bits, input_type)
 
-        # Convert to LLRs based on input type
-        if detected_type == "sigmoid":
-            threshold = 0.5
-        else:  # logits
-            threshold = 0.0
-
-        tag_bits = (tag_bits > threshold).to(torch.uint8)
+        # Convert to binary using ValueConverter
+        tag_bits = ValueConverter.to_binary(tag_bits, detected_type)
 
         expected_tag = self.hmac_tag
 
@@ -161,36 +157,3 @@ class HMACProvider(MACProvider):
         message = payload_bits[:, : self.message_bits]
         tag = payload_bits[:, self.message_bits : self.message_bits + self.tag_bits]
         return message, tag
-
-    # TODO: Copy & pasted from polar_codec.py. Consider to use this communal utility
-    def _detect_input_type(
-        self, values: torch.Tensor, specified: str
-    ) -> Literal["sigmoid", "logits"]:
-        """
-        Detect whether input values are sigmoid probabilities or raw logits.
-
-        Args:
-            values: Input array
-            specified: User-specified type ("auto", "sigmoid", "logits")
-
-        Returns:
-            Detected type: "sigmoid" or "logits"
-        """
-        if specified == "sigmoid":
-            return "sigmoid"
-        elif specified == "logits":
-            return "logits"
-        else:  # auto
-            min_val, max_val = float(values.min()), float(values.max())
-
-            # Check if values are within sigmoid range [0, 1] with margin
-            if (
-                min_val >= -self._sigmoid_range_margin
-                and max_val <= 1.0 + self._sigmoid_range_margin
-            ):
-                # Additional check: if all values are very close to 0 or 1,
-                # they might still be hard logits
-                if min_val >= 0.0 and max_val <= 1.0:
-                    return "sigmoid"
-
-            return "logits"
