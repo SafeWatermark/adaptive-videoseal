@@ -92,11 +92,27 @@ Adaptive VideoSeal 프로젝트는 **VideoSeal** 모델 외에도 **StegaStamp**
 | **polar** | Sionna 기반 5G NR Polar 코드. SC, SCL, BP 디코더를 지원하며 soft-input 디코딩으로 노이즈에 강건함. |
 
 ```bash
-uv run python src/poc.py --model videoseal --ecc_mode rs ...    # Reed-Solomon
-uv run python src/poc.py --model videoseal --ecc_mode polar ... # Polar code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ...    # Reed-Solomon
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=polar ... # Polar code
 ```
 
----
+#### **MAC 모드 (메시지 인증 코드, Message Authentication Code)**
+
+`--mac_mode` 플래그를 사용해 **워터마크 메시지를 인증(Authentication)** 합니다. 이는 **디코딩된 워터마크**가 워터마크 모델에 의해 생성된 것인지, 아니면 공격자에 의해 위조된 것인지를 검증합니다.
+
+* 스푸핑/위조(Forge) 공격에 대한 저항성을 향상
+* **거짓 음성(False Negative)** 이 증가할 수 있음 (유효한 워터마크가 거부될 수 있음)
+* 탐지 실패를 줄이기 위해 **ECC 모드**와 함께 사용하는 것을 권장
+
+| MAC 모드   | 설명                                                                                 |
+| -------- | ---------------------------------------------------------------------------------- |
+| **hmac** | 비밀 키 + 암호학적 해시 함수(예: SHA-256)를 사용하여 워터마크 메시지에 대한 인증 태그(Authentication Tag)를 생성합니다. |
+
+```bash
+uv run python src/poc.py --model videoseal --mac_mode --mac_algorithm=hmac ... # hmac
+```
+
+
 
 ### 3.2 Adaptive watermarking 실험
 
