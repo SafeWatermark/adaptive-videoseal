@@ -91,11 +91,13 @@ Adaptive VideoSeal 프로젝트는 **VideoSeal** 모델 외에도 **StegaStamp**
 | **rs** | Reed-Solomon 코드. 설정 가능한 중복도를 가진 전통적인 대수적 ECC. |
 | **polar** | Sionna 기반 5G NR Polar 코드. SC, SCL, BP 디코더를 지원하며 soft-input 디코딩으로 노이즈에 강건함. |
 | **conv** | Sionna 기반 Convolutional 코드 (Viterbi 디코딩). Rate 1/2, 1/3 및 constraint length 3-8 지원. 연속 에러(burst error) 정정에 효과적. |
+| **hamming** | Hamming 코드 (PyTorch). Hamming(7,4), (15,11), (31,26), (63,57) 지원. 블록당 1비트 오류 정정. 빠르고 경량. |
 
 ```bash
-uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ...    # Reed-Solomon
-uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=polar ... # Polar code
-uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=conv ...  # Convolutional code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ...      # Reed-Solomon
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=polar ...   # Polar code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=conv ...    # Convolutional code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=hamming ... # Hamming code
 ```
 
 #### **MAC 모드 (메시지 인증 코드, Message Authentication Code)**
