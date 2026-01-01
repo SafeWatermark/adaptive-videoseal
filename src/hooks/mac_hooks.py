@@ -1,6 +1,8 @@
 import torch
 from videoseal.models.extractor import Extractor
 from hooks.utils import infer_input_type_by_module
+from hooks.ecc_hooks import ecc_forward_hook
+from schemas.model_outputs import OutputValueType
 
 
 def mac_forward_hook(module: Extractor, input, output) -> torch.Tensor:
@@ -21,6 +23,15 @@ def mac_forward_hook(module: Extractor, input, output) -> torch.Tensor:
     message_bits, _ = module.mac_provider.split_payload_bits(payload_bits)
 
     input_type = infer_input_type_by_module(module)
+
+    # If ecc_forward_hook runs before this hook, input_type should be BINARY
+    # (ECC decode converts soft messages to binary)
+    for hook_fn in getattr(module, "_forward_hooks", {}).values():
+        if hook_fn is mac_forward_hook:
+            break
+        if hook_fn is ecc_forward_hook:
+            input_type = OutputValueType.BINARY
+            break
 
     verification = module.mac_provider.verify_tag(payload_bits, input_type)
     module.mac_provider.verification_results.extend(verification.tolist())
