@@ -40,9 +40,8 @@ from models.stega_stamp import STEGA_STAMP_NUM_BITS
 from models.revmark import REVMARK_DEFAULT_MSG_BITS
 from schemas import create_meta_for_model
 from mac.registry import mac_provider_registry
-from mac.configs import mac_settings
-from mac.base import MACProvider
-from mac.configs import DetectionProbabilityScaling
+from mac.configs import mac_settings, DetectionProbabilityScaling
+from videoseal.models.extractor import Extractor
 
 
 def get_model_config(model_name: str, model: Videoseal) -> dict:
@@ -346,7 +345,6 @@ class CodecManager:
         self.total_bits = total_bits
         self.threshold = threshold
         self.mac_provider = None
-        self.adaptive_mac_provider = None
         self.ecc_codec = None
 
     def apply_codecs(
@@ -389,10 +387,6 @@ class CodecManager:
             self.args.mac_algorithm, mac_provider_registry["default"]
         )(**mac_kwargs)
 
-        self.adaptive_mac_provider = mac_provider_registry.get(
-            self.args.mac_algorithm, mac_provider_registry["default"]
-        )(**mac_kwargs)
-
         ecc_kwargs = {
             "message_bits": mac_kwargs["message_bits"] + mac_kwargs["tag_bits"],
             "total_bits": self.total_bits,
@@ -407,7 +401,7 @@ class CodecManager:
             model, self.ecc_codec, self.mac_provider
         )
         adaptive_model = transform_authenticated_ecc_videoseal(
-            adaptive_model, self.ecc_codec, self.adaptive_mac_provider
+            adaptive_model, self.ecc_codec, self.mac_provider
         )
 
         return model, adaptive_model
@@ -422,13 +416,9 @@ class CodecManager:
             self.args.mac_algorithm, mac_provider_registry["default"]
         )(**mac_kwargs)
 
-        self.adaptive_mac_provider = mac_provider_registry.get(
-            self.args.mac_algorithm, mac_provider_registry["default"]
-        )(**mac_kwargs)
-
         model = transform_authenticated_videoseal(model, self.mac_provider)
         adaptive_model = transform_authenticated_videoseal(
-            adaptive_model, self.adaptive_mac_provider
+            adaptive_model, self.mac_provider
         )
 
         return model, adaptive_model
@@ -496,11 +486,9 @@ class TrialRunner:
 
         # Decode and verify
         adaptive_msgs_ori = self._decode_messages(
-            adaptive_msgs_ori, self.codec_manager.adaptive_mac_provider, "Adaptive"
+            adaptive_msgs_ori, self.adaptive_model.detector, "Adaptive"
         )
-        msgs_ori = self._decode_messages(
-            msgs_ori, self.codec_manager.mac_provider, "VideoSeal"
-        )
+        msgs_ori = self._decode_messages(msgs_ori, self.model.detector, "VideoSeal")
 
         # Calculate accuracies
         threshold = self._get_bit_accuracy_threshold()
@@ -544,7 +532,7 @@ class TrialRunner:
         return msgs_ori, soft_msgs
 
     def _decode_messages(
-        self, msgs_ori: torch.Tensor, mac_provider: MACProvider, model_name: str
+        self, msgs_ori: torch.Tensor, detector: Extractor, model_name: str
     ) -> torch.Tensor:
         """Decode original messages through ECC and/or MAC layers."""
         if self.config.args.ecc_mode:
@@ -553,8 +541,8 @@ class TrialRunner:
             decoded, _ = self.codec_manager.ecc_codec.decode(msgs_ori)
             msgs_ori = decoded.squeeze()
 
-        if self.config.args.mac_mode and mac_provider is not None:
-            verification_results = mac_provider.verification_results
+        if self.config.args.mac_mode and self.codec_manager.mac_provider is not None:
+            verification_results = detector.mac_verification_results
             true_positive_ratio = sum(verification_results) / len(verification_results)
             self.logger.info(
                 f"[Authentication - {model_name}] False Negative ratio: "
@@ -563,9 +551,9 @@ class TrialRunner:
 
             if msgs_ori.ndim == 1:
                 msgs_ori = msgs_ori.unsqueeze(0)
-            msgs_ori, _ = mac_provider.split_payload_bits(msgs_ori)
+            msgs_ori, _ = self.codec_manager.mac_provider.split_payload_bits(msgs_ori)
             msgs_ori = msgs_ori.squeeze(0)
-            mac_provider.clear_results()
+            detector.mac_verification_results.clear()
 
         return msgs_ori
 
