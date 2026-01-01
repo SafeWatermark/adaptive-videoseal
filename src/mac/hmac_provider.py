@@ -2,7 +2,12 @@ from mac.base import MACProvider
 import hmac
 import hashlib
 import torch
-from mac.configs import mac_settings
+from mac.configs import (
+    mac_settings,
+    DetectionProbabilityScaling,
+)
+
+
 from pydantic_settings import BaseSettings
 from typing import Literal
 from schemas.converters import ValueConverter
@@ -10,13 +15,20 @@ from schemas.converters import ValueConverter
 
 class HMACProvider(MACProvider):
     def __init__(
-        self, message_bits: int, tag_bits: int, config: BaseSettings = mac_settings
+        self,
+        message_bits: int,
+        tag_bits: int,
+        config: BaseSettings = mac_settings,
+        detection_scaling: DetectionProbabilityScaling = DetectionProbabilityScaling(),
     ):
         self.message_bits = message_bits
         self.tag_bits = tag_bits
         self.config = config
+        self.detection_scaling = detection_scaling
         self.hmac_tag = self._compute_truncated_hmac_tag()
 
+        # mac_provider & adaptive_mac_provider are same configuration each other, but to store the verification results, instantiate different object
+        # TODO: Consider how to store verification results
         self.verification_results: list = []
 
         if self.tag_bits <= 0:
@@ -157,3 +169,33 @@ class HMACProvider(MACProvider):
         message = payload_bits[:, : self.message_bits]
         tag = payload_bits[:, self.message_bits : self.message_bits + self.tag_bits]
         return message, tag
+
+    def compute_tag_match_ratio(
+        self,
+        payload_bits: torch.Tensor,
+        input_type: Literal["auto", "sigmoid", "logits", "binary"] = "auto",
+    ) -> torch.Tensor:
+        """Compute bit-match ratio between extracted and expected tag.
+
+        Args:
+            payload_bits: shape [B, message_bits + tag_bits]
+            input_type: Input interpretation mode ("auto", "sigmoid", "logits", "binary")
+
+        Returns:
+            torch.Tensor: shape [B], values in [0, 1] representing match ratio
+        """
+        _, tag_bits = self.split_payload_bits(payload_bits)
+
+        # Detect and convert to binary
+        detected_type = ValueConverter.detect_value_type(tag_bits, input_type)
+        tag_bits = ValueConverter.to_binary(tag_bits, detected_type)
+
+        expected_tag = self.hmac_tag
+        if expected_tag.ndim == 1:
+            expected_tag = expected_tag.expand(tag_bits.size(0), -1)
+
+        # Compute bit-match ratio
+        matching_bits = (tag_bits.to(torch.uint8) == expected_tag.to(torch.uint8)).sum(
+            dim=-1
+        )
+        return matching_bits.float() / self.tag_bits
