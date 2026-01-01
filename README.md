@@ -87,12 +87,14 @@ Use the `--ecc_mode` flag to enable error correction for watermark messages. Thi
 | **polar** | 5G NR Polar code via Sionna. Supports SC, SCL, BP decoders with soft-input decoding for better noise resilience. |
 | **conv** | Convolutional code with Viterbi decoding via Sionna. Supports rate 1/2, 1/3 and constraint lengths 3-8. Effective for burst error correction. |
 | **hamming** | Hamming code (pure PyTorch). Supports Hamming(7,4), (15,11), (31,26), (63,57). Single-bit error correction per block. Fast and lightweight. |
+| **bch** | BCH code (pure PyTorch). Supports BCH(15,7,2), (31,21,2), (63,51,2), etc. Multi-bit error correction with Berlekamp-Massey decoding. |
 
 ```bash
 uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=polar ...    # Polar code
 uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ...       # Reed-Solomon code
 uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=conv ...     # Convolutional code
 uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=hamming ...  # Hamming code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=bch ...      # BCH code
 ```
 
 

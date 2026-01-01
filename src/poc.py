@@ -736,7 +736,7 @@ if __name__ == "__main__":
         "--ecc_codec",
         type=str,
         default="polar",
-        choices=["polar", "rs", "conv", "hamming"],
+        choices=["polar", "rs", "conv", "hamming", "bch"],
         help="If ecc_mode is set, ecc_codec needs. default: polar codec",
     )
     parser.add_argument(
