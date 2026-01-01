@@ -736,7 +736,7 @@ if __name__ == "__main__":
         "--ecc_codec",
         type=str,
         default="polar",
-        choices=["polar", "rs"],
+        choices=["polar", "rs", "conv"],
         help="If ecc_mode is set, ecc_codec needs. default: polar codec",
     )
     parser.add_argument(
@@ -760,7 +760,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--message_bits",
         type=int,
-        default=32,
+        default=16,
         help="Number of message bits (before MAC/ECC)",
     )
     parser.add_argument(
