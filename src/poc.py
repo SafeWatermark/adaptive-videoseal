@@ -42,6 +42,7 @@ from schemas import create_meta_for_model
 from mac.registry import mac_provider_registry
 from mac.configs import mac_settings
 from mac.base import MACProvider
+from mac.configs import DetectionProbabilityScaling
 
 
 def get_model_config(model_name: str, model: Videoseal) -> dict:
@@ -362,10 +363,17 @@ class CodecManager:
         self, model: Videoseal, adaptive_model: AdaptiveVideoseal
     ) -> tuple[Videoseal, AdaptiveVideoseal]:
         """Apply MAC authentication to models."""
+        if self.args.model == "videoseal":
+            scaling_model, scaling_mac = 0.5, 0.5
+        elif self.args.model == "stega_stamp" or self.args.model == "revmark":
+            scaling_model, scaling_mac = 0.0, 1.0
         mac_kwargs = {
             "message_bits": self.args.message_bits,
             "tag_bits": self.args.mac_tag_bits,
             "config": mac_settings,
+            "detection_scaling": DetectionProbabilityScaling(
+                scaling_model, scaling_mac
+            ),
         }
 
         if self.args.ecc_mode:

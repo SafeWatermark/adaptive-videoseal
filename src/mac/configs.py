@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
-
+from dataclasses import dataclass
 
 # Research-only deterministic key (32 bytes = 256-bit) and password.
 # Secret key must be hex-encoded: 64 hex chars = 32 bytes.
@@ -77,3 +77,26 @@ class MACSettings(BaseSettings):
 
 
 mac_settings = MACSettings()
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionProbabilityScaling:
+    """Configuration for combining model and MAC detection probabilities.
+
+    Formula: combined_prob = scaling_model * model_prob + scaling_mac * mac_prob
+    where mac_prob = matching_tag_bits / total_tag_bits
+
+    - VideoSeal 1.0 provides a model probability, so the default weighting is:
+
+      scaling_model = 0.5
+      scaling_mac   = 0.5
+
+    - StegaStamp and REVMark do not provide a model probability. In these cases, it is
+    preferable to rely entirely on MAC matching:
+
+        scaling_model = 0.0
+        scaling_mac   = 1.0
+    """
+
+    scaling_model: float = 0.5  # Weight for model's probability
+    scaling_mac: float = 0.5  # Weight for MAC verification probability

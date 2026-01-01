@@ -141,3 +141,75 @@ class TestVerifyTag:
         result = provider.verify_tag(payload)
 
         assert not result[0]
+
+
+class TestComputeTagMatchRatio:
+    @pytest.fixture
+    def provider(self):
+        return HMACProvider(message_bits=8, tag_bits=16, config=DummyConfig())
+
+    def test_perfect_match_returns_one(self, provider):
+        """Returns 1.0 when all tag bits match."""
+        message = torch.tensor(
+            [[1, 0, 1, 0, 1, 0, 1, 0], [0, 1, 0, 1, 0, 1, 0, 1]], dtype=torch.float32
+        )
+        payload = provider.build_authenticated_payload_bits(message)
+
+        result = provider.compute_tag_match_ratio(payload.float())
+
+        assert result.shape == (2,)
+        assert torch.allclose(result, torch.ones(2))
+
+    def test_all_bits_flipped_returns_zero(self, provider):
+        """Returns 0.0 when all tag bits are flipped."""
+        message = torch.tensor([[1, 0, 1, 0, 1, 0, 1, 0]], dtype=torch.float32)
+        payload = provider.build_authenticated_payload_bits(message)
+
+        # Flip all tag bits (positions 8 to 23)
+        payload[:, 8:24] = 1 - payload[:, 8:24]
+
+        result = provider.compute_tag_match_ratio(payload.float())
+
+        assert torch.allclose(result, torch.zeros(1))
+
+    def test_partial_match_returns_correct_ratio(self, provider):
+        """Returns correct ratio for partial bit matches."""
+        message = torch.tensor([[1, 0, 1, 0, 1, 0, 1, 0]], dtype=torch.float32)
+        payload = provider.build_authenticated_payload_bits(message)
+
+        # Flip 4 out of 16 tag bits → ratio = 12/16 = 0.75
+        payload[:, 8:12] = 1 - payload[:, 8:12]
+
+        result = provider.compute_tag_match_ratio(payload.float())
+
+        expected = torch.tensor([0.75])
+        assert torch.allclose(result, expected)
+
+    def test_batch_processing(self, provider):
+        """Works correctly with batched inputs having different match ratios."""
+        message = torch.zeros(3, 8, dtype=torch.float32)
+        payload = provider.build_authenticated_payload_bits(message)
+
+        # Batch 0: perfect match (16/16)
+        # Batch 1: flip 4 bits (12/16 = 0.75)
+        payload[1, 8:12] = 1 - payload[1, 8:12]
+        # Batch 2: flip 8 bits (8/16 = 0.5)
+        payload[2, 8:16] = 1 - payload[2, 8:16]
+
+        result = provider.compute_tag_match_ratio(payload.float())
+
+        expected = torch.tensor([1.0, 0.75, 0.5])
+        assert torch.allclose(result, expected)
+
+    def test_single_bit_flip(self, provider):
+        """Returns correct ratio when single bit is flipped."""
+        message = torch.tensor([[1, 0, 1, 0, 1, 0, 1, 0]], dtype=torch.float32)
+        payload = provider.build_authenticated_payload_bits(message)
+
+        # Flip 1 out of 16 tag bits → ratio = 15/16 = 0.9375
+        payload[0, 8] = 1 - payload[0, 8]
+
+        result = provider.compute_tag_match_ratio(payload.float())
+
+        expected = torch.tensor([15.0 / 16.0])
+        assert torch.allclose(result, expected)

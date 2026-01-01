@@ -1,39 +1,35 @@
 import torch
+from videoseal.models.extractor import Extractor
 
 
-def apply_mac_encoding(module, msgs: torch.Tensor) -> torch.Tensor:
-    """Apply MAC(Message Authenticated Code) encoding to message bits.
-
-    Args:
-        msgs: (B, message_bits) tensor of message bits.
-
-    Returns:
-        (B, message_bits + tag_bits) tensor with MAC-encoded bits.
-    """
-    encoded_tensor = (
-        module.embedder.msg_processor.mac_provider.build_authenticated_payload_bits(
-            msgs
-        )
-    )
-    return encoded_tensor
-
-
-def mac_forward_hook(module, input, output):
+def mac_forward_hook(module: Extractor, input, output) -> torch.Tensor:
     """
     Post-forward hook that:
     1. Splits output into message_bits and tag_bits
     2. Verifies MAC tag
-    3. Stores verification result
-    4. Returns message_bits only (tag stripped)
+    3. Computes combined detection probability
+    4. Returns combined_probability + message_bits (tag stripped)
+
+    Combined probability formula:
+        mac_prob = matching_tag_bits / total_tag_bits
+        combined_prob = scaling_model * model_prob + scaling_mac * mac_prob
     """
-    probability = output[:, 0].unsqueeze(1)
+    model_probability = output[:, 0].unsqueeze(1)
     payload_bits = output[:, 1:]  # message || tag
 
     message_bits, _ = module.mac_provider.split_payload_bits(payload_bits)
     verification = module.mac_provider.verify_tag(payload_bits)
-
     module.mac_provider.verification_results.extend(verification.tolist())
 
-    # TODO: Consider tune the probability following by verificatoin or not
-    # For instance, model_weights* model_probability + mac_weights * mac_consistency
-    return torch.cat([probability, message_bits], dim=1)
+    # Compute MAC probability as bit-match ratio (e.g., 28/32 = 0.875)
+    mac_probability = module.mac_provider.compute_tag_match_ratio(payload_bits)
+    mac_probability = mac_probability.unsqueeze(1)
+
+    # Combine probabilities using scaling factors
+    scaling = module.mac_provider.detection_scaling
+    combined_probability = (
+        scaling.scaling_model * model_probability
+        + scaling.scaling_mac * mac_probability
+    )
+
+    return torch.cat([combined_probability, message_bits], dim=1)
