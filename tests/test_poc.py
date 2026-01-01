@@ -236,7 +236,6 @@ class TestCodecManager:
         assert manager.total_bits == 256
         assert manager.threshold == 0.0
         assert manager.mac_provider is None
-        assert manager.adaptive_mac_provider is None
         assert manager.ecc_codec is None
 
     def test_apply_codecs_no_mode(self, default_args):

@@ -34,7 +34,7 @@ def mac_forward_hook(module: Extractor, input, output) -> torch.Tensor:
             break
 
     verification = module.mac_provider.verify_tag(payload_bits, input_type)
-    module.mac_provider.verification_results.extend(verification.tolist())
+    module.mac_verification_results.extend(verification.tolist())
 
     # Compute MAC probability as bit-match ratio (e.g., 28/32 = 0.875)
     mac_probability = module.mac_provider.compute_tag_match_ratio(
