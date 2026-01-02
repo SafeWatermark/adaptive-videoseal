@@ -36,6 +36,8 @@ dependencies = [
     "onnxruntime>=1.23.2",
     "onnx2torch>=1.5.15",
     "pydantic-settings>=2.12.0",
+    "tensorflow[and-cuda]>=2.20.0",
+    "sionna>=0.8.0",
 ]
 
 
