@@ -10,4 +10,3 @@ VideoMarkBench repository structure, supporting:
 """
 
 __version__ = "0.1.0"
-

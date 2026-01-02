@@ -30,7 +30,10 @@ MODEL=${1:-videoseal}
 MAX_VIDEOS=${2:-5}
 
 # Ensure submodule is initialized
-if [ ! -d "src/videomarkbench" ]; then
+# Check for .git file/symlink instead of just directory existence
+# Submodules always have .git file/symlink when properly initialized
+# Use -e to check for file, directory, or symlink
+if [ ! -e "src/videomarkbench/.git" ]; then
     echo "Initializing VideoMarkBench submodule..."
     git submodule update --init --recursive
 fi

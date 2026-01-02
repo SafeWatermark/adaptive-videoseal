@@ -235,3 +235,99 @@ data/videomarkbench/
     {style}/        # realistic, cartoon, sci-fi
       {id}.mp4      # Video files
 ```
+
+**2. Kinetics-400 데이터셋 (위조 공격용)**
+
+위조 공격 평가를 위해서는 Kinetics-400 데이터셋 샘플을 다운로드해야 합니다. 샘플 다운로드를 위한 스크립트를 제공합니다:
+
+**권장: 사전 검증된 CSV 파일 사용 (접근 불가능한 영상 방지)**
+
+```bash
+# 사전 검증된 CSV 파일을 사용하여 다운로드 (권장)
+# 스크립트는 data/kinetics/kinetics400_available_1000.csv가 존재하면 자동으로 사용합니다
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics
+
+# 또는 사용자 지정 CSV 파일 지정
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics \
+    --csv_file data/kinetics/kinetics400_available_1000.csv
+```
+
+**대안: 랜덤 샘플링 모드 (접근 불가능한 영상 포함될 수 있음)**
+
+```bash
+# 샘플 다운로드 (기본값: 10개 클래스, 클래스당 5개 비디오)
+PYTHONPATH=src uv run python scripts/download_kinetics_sample.py \
+    --output_dir data/kinetics \
+    --split val \
+    --num_classes 10 \
+    --videos_per_class 5 \
+    --seed 42
+```
+
+**옵션:**
+- `--output_dir`: 출력 디렉토리 (기본값: `data/kinetics`)
+- `--csv_file`: 접근 가능한 비디오 ID가 포함된 CSV 파일 경로 (youtube_id,time_start,label). 지정하지 않으면 `data/kinetics/kinetics400_available_1000.csv`가 존재하는 경우 자동으로 사용됩니다. 그렇지 않으면 랜덤 샘플링 모드를 사용합니다.
+- `--split`: 다운로드할 데이터셋 분할 - `train`, `val`, 또는 `test` (랜덤 샘플링 모드에서만 사용, 기본값: `val`)
+- `--num_classes`: 샘플링할 액션 클래스 수 (랜덤 샘플링 모드에서만 사용, 기본값: 10)
+- `--videos_per_class`: 클래스당 비디오 수 (랜덤 샘플링 모드에서만 사용, 기본값: 5)
+- `--seed`: 샘플링을 위한 랜덤 시드 (랜덤 샘플링 모드에서만 사용, 기본값: 42)
+
+**요구사항:**
+- `yt-dlp`가 설치되어 있어야 합니다 (`uv sync`를 통해 자동 설치됨)
+
+다운로드된 비디오는 다음과 같이 구성됩니다:
+
+```
+data/kinetics/
+  kinetics400_available_1000.csv  # 사전 검증된 비디오 목록 (선택사항)
+  videos/
+    {label}_{youtube_id}_{time_start}.mp4
+```
+
+**3. 전체 데이터셋 구조**
+
+두 데이터셋을 모두 다운로드한 후, `data/` 디렉토리는 다음과 같은 구조를 가져야 합니다:
+
+```
+data/
+  videomarkbench/          # 제거 공격용 (생성형 AI 비디오)
+    {model}/               # Sora, Hunyuan, SVD
+      {style}/             # realistic, cartoon, sci-fi
+        {id}.mp4
+  kinetics/                # 위조 공격용 (Kinetics-400 샘플)
+    kinetics400_available_1000.csv  # 사전 검증된 비디오 목록 (선택사항)
+    videos/
+      {label}_{youtube_id}_{time_start}.mp4
+```
+
+#### 평가 실행
+
+**Common Perturbations 및 Whitebox Attacks:**
+
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/evaluation \
+    --max_videos 10 \
+    --evaluate_common \
+    --evaluate_whitebox \
+    --wevade_version standard \
+    --wevade_rb 0.1
+```
+
+**주요 인자:**
+- `--dataset`: VideoMarkBench 데이터셋 경로 (제거 공격에 사용)
+- `--kinetics_dataset`: Kinetics 데이터셋 경로 (위조 공격에 사용)
+- `--evaluate_common`: Common perturbations 평가 (JPEG, Gaussian, Crop 등)
+- `--evaluate_whitebox`: Whitebox attacks 평가 (WEvade)
+- `--wevade_version`: `standard` 또는 `adaptive` (기본값: `standard`)
+- `--wevade_rb`: Perturbation bound (L-infinity norm) (기본값: 0.1)
+
+**참고:**
+- **제거 공격**은 VideoMarkBench 데이터셋 사용 (생성형 AI 비디오)
+- **위조 공격**은 Kinetics 데이터셋 사용 (실제 비디오)
+- `--kinetics_dataset`이 지정되지 않으면 위조 공격도 제거 공격과 동일한 데이터셋 사용 (하위 호환성)
