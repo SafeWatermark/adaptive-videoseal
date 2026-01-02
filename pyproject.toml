@@ -37,6 +37,8 @@ dependencies = [
     "onnx2torch>=1.5.15",
     "yt-dlp>=2025.11.12",
     "easydict>=1.13",
+    "sionna>=0.8.0",
+    "tensorflow[and-cuda]>=2.20.0",
 ]
 
 
