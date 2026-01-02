@@ -18,9 +18,11 @@ class LayeredMsgProcessor(MsgProcessor):
         msg_processor_type: str = "binary+concat",
         msg_mult: float = 1.0,
         layers: list[MsgLayer] | None = None,
+        device: torch.device = torch.device("cpu"),
     ):
         super().__init__(nbits, hidden_size, msg_processor_type, msg_mult)
         self._layers: list[MsgLayer] = list(layers) if layers is not None else []
+        self.device = device
 
     def add_layer(self, layer: MsgLayer) -> None:
         self._layers.append(layer)
@@ -39,7 +41,7 @@ class LayeredMsgProcessor(MsgProcessor):
         return [layer.name for layer in self._layers]
 
     def get_random_msg(self, bsz: int = 1, nb_repetitions: int = 1) -> torch.Tensor:
-        msg = super().get_random_msg(bsz, nb_repetitions)
+        msg = super().get_random_msg(bsz, nb_repetitions).to(self.device)
 
         for layer in self._layers:
             msg = layer(msg)

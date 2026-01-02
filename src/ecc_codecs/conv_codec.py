@@ -214,7 +214,7 @@ class ConvWatermarkCodec(ECCCodec):
         u = self._torch_to_tf(message_bits)
         u = tf.cast(u, tf.float32)
 
-        c = self.encoder(u)  # (B, n)
+        c = self.encoder(u, training=False)  # (B, n)
 
         return self._tf_to_torch(c).to(torch.uint8)
 
@@ -279,7 +279,7 @@ class ConvWatermarkCodec(ECCCodec):
         y_tf = tf.cast(y_tf, tf.float32)
 
         # Decode - Viterbi returns hard decisions
-        u_hat = self.decoder(y_tf)  # (B, k)
+        u_hat = self.decoder(y_tf, training=False)  # (B, k)
         u_hat = self._tf_to_torch(u_hat).to(torch.uint8)
 
         # Viterbi decoder doesn't provide error count

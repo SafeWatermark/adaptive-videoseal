@@ -34,7 +34,13 @@ class RSWatermarkCodec(ECCCodec):
     """
 
     def __init__(
-        self, total_bits, message_bits: int, threshold: float = 0.5, *args, **kwargs
+        self,
+        total_bits,
+        message_bits: int,
+        threshold: float = 0.5,
+        device: torch.device = torch.device("cpu"),
+        *args,
+        **kwargs,
     ):
         """Initialize RS codec for watermark.
 
@@ -61,6 +67,7 @@ class RSWatermarkCodec(ECCCodec):
         self.rs_bits = self.parity_bits + self.message_bits
         self.rs_bytes = self.rs_bits // 8
         self.reserved_bits = self.total_bits - self.rs_bits
+        self.device = device
 
         if self.parity_bytes < 2:
             raise ValueError(

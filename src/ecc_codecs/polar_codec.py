@@ -180,7 +180,7 @@ class PolarWatermarkCodec(ECCCodec):
         u = self._torch_to_tf(message_bits)
         u = tf.cast(u, tf.float32)
 
-        c = self.encoder(u)  # (B, n)
+        c = self.encoder(u, training=False)  # (B, n)
 
         return self._tf_to_torch(c).to(torch.uint8)
 
@@ -237,7 +237,7 @@ class PolarWatermarkCodec(ECCCodec):
         y = tf.cast(y, tf.float32)
 
         # Decode - returns hard decisions directly
-        u_hat = self.decoder(y)  # (1, k)
+        u_hat = self.decoder(y, training=False)  # (1, k)
         u_hat = self._tf_to_torch(u_hat).to(torch.uint8)
 
         bit_errors = [0] * polar_bits.size(

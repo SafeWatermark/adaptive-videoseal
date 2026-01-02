@@ -135,8 +135,10 @@ def transform_authenticated_videoseal(
         Transformed model with ECC support
     """
     msg_processor = LayeredMsgProcessor(
-        nbits=mac_provider.message_bits, layers=[MACMsgProcessor(mac_provider)]
-    )
+        nbits=mac_provider.message_bits,
+        layers=[MACMsgProcessor(mac_provider)],
+        device=mac_provider.device,
+    ).to(mac_provider.device)
     model.embedder.msg_processor = msg_processor
     model.detector.register_forward_hook(mac_forward_hook)
     setattr(model.detector, "mac_provider", mac_provider)
@@ -163,7 +165,8 @@ def transform_authenticated_ecc_videoseal(
     msg_processor = LayeredMsgProcessor(
         nbits=mac_provider.message_bits,
         layers=[MACMsgProcessor(mac_provider), ECCMsgProcessor(ecc_codec)],
-    )
+        device=ecc_codec.device,
+    ).to(ecc_codec.device)
     model.embedder.msg_processor = msg_processor
     model.detector.register_forward_hook(ecc_forward_hook)
     model.detector.register_forward_hook(mac_forward_hook)

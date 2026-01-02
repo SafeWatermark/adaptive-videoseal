@@ -183,7 +183,7 @@ def embed_video(
     process1.wait()
     process2.wait()
 
-    return msgs
+    return msgs.to(model.device)
 
 
 def detect_video_clip(model: Videoseal, clip: np.ndarray) -> torch.Tensor:
@@ -242,7 +242,7 @@ def detect_video(
 
     soft_msgs = torch.cat(soft_msgs, dim=0)
     soft_msgs = soft_msgs.mean(dim=0)  # Average the predictions across all frames
-    return soft_msgs
+    return soft_msgs.to(model.device)
 
 
 class ExperimentConfig:
@@ -340,12 +340,19 @@ class ModelFactory:
 class CodecManager:
     """Manages ECC and MAC codec configuration and application."""
 
-    def __init__(self, args, total_bits: int, threshold: float):
+    def __init__(
+        self,
+        args,
+        total_bits: int,
+        threshold: float,
+        device: torch.device = torch.device("cpu"),
+    ):
         self.args = args
         self.total_bits = total_bits
         self.threshold = threshold
         self.mac_provider = None
         self.ecc_codec = None
+        self.device = device
 
     def apply_codecs(
         self, model: Videoseal, adaptive_model: AdaptiveVideoseal
@@ -372,6 +379,7 @@ class CodecManager:
             "detection_scaling": DetectionProbabilityScaling(
                 scaling_model, scaling_mac
             ),
+            "device": self.device,
         }
 
         if self.args.ecc_mode:
@@ -391,6 +399,7 @@ class CodecManager:
             "message_bits": mac_kwargs["message_bits"] + mac_kwargs["tag_bits"],
             "total_bits": self.total_bits,
             "threshold": self.threshold,
+            "device": self.device,
         }
 
         self.ecc_codec = ecc_codec_registry.get(
@@ -673,7 +682,7 @@ def run_experiment(args):
     # Apply codecs
     model_config = get_model_config(args.model, model)
     codec_manager = CodecManager(
-        args, model_config["total_bits"], model_config["threshold"]
+        args, model_config["total_bits"], model_config["threshold"], device
     )
     model, adaptive_model = codec_manager.apply_codecs(model, adaptive_model)
 
