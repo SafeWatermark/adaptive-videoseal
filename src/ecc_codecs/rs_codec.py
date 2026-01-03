@@ -84,9 +84,9 @@ class RSWatermarkCodec(ECCCodec):
             "message_bytes": self.message_bytes,
             "parity_bytes": self.parity_bytes,
             "parity_bits": self.parity_bytes * 8,
-            "rs_total_bytes": self.RS_BYTES,
+            "rs_total_bytes": self.rs_bytes,
             "error_correction_capacity_bytes": self.error_correction_capacity,
-            "total_bits": self.TOTAL_BITS,
+            "total_bits": self.total_bits,
         }
 
     def encode(self, message_bits: torch.Tensor) -> torch.Tensor:
