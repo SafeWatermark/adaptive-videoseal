@@ -273,9 +273,10 @@ data/
 
 #### Running Evaluation
 
-**Common Perturbations and Whitebox Attacks:**
+**Common Perturbations, Blackbox Attacks, and Whitebox Attacks:**
 
 ```bash
+# Common perturbations and whitebox attacks
 PYTHONPATH=src uv run python src/evaluate/main.py \
     --model videoseal \
     --dataset data/videomarkbench \
@@ -286,12 +287,39 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
     --evaluate_whitebox \
     --wevade_version standard \
     --wevade_rb 0.1
+
+# Blackbox attacks (Square Attack)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/blackbox_eval \
+    --max_videos 40 \
+    --max_frames_per_video 14 \
+    --evaluate_blackbox_removal \
+    --evaluate_blackbox_forgery \
+    --blackbox_attack_method square
+
+# Blackbox attacks (Triangle Attack)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/blackbox_eval \
+    --max_videos 40 \
+    --max_frames_per_video 14 \
+    --evaluate_blackbox_removal \
+    --evaluate_blackbox_forgery \
+    --blackbox_attack_method triangle
 ```
 
 **Key Arguments:**
 - `--dataset`: Path to VideoMarkBench dataset (used for removal attacks)
 - `--kinetics_dataset`: Path to Kinetics dataset (used for forgery attacks)
 - `--evaluate_common`: Evaluate common perturbations (JPEG, Gaussian, Crop, etc.)
+- `--evaluate_blackbox_removal`: Evaluate blackbox removal attacks (Square/Triangle Attack)
+- `--evaluate_blackbox_forgery`: Evaluate blackbox forgery attacks (Square/Triangle Attack)
+- `--blackbox_attack_method`: `square` or `triangle` (default: `square`)
 - `--evaluate_whitebox`: Evaluate whitebox attacks (WEvade)
 - `--wevade_version`: `standard` or `adaptive` (default: `standard`)
 - `--wevade_rb`: Perturbation bound (L-infinity norm) (default: 0.1)
@@ -300,3 +328,4 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - **Removal attacks** use the VideoMarkBench dataset (generated AI videos)
 - **Forgery attacks** use the Kinetics dataset (real-world videos)
 - If `--kinetics_dataset` is not specified, forgery attacks will use the same dataset as removal attacks (for backward compatibility)
+- **Triangle Attack** requires `torch_dct` package (`uv add torch-dct`)
