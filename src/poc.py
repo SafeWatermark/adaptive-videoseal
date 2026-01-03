@@ -295,7 +295,7 @@ def run_experiment(args):
             # ecc_kwargs["input_type"] = "logits"
         elif args.model == "stega_stamp":
             ecc_kwargs["total_bits"] = STEGA_STAMP_NUM_BITS
-            ecc_kwargs["threshold"] = 0.0  # StegaStamp uses logits
+            ecc_kwargs["threshold"] = 0.5  # StegaStamp uses binary
             # ecc_kwargs["input_type"] = "sigmoid"
         elif args.model == "revmark":
             ecc_kwargs["total_bits"] = REVMARK_DEFAULT_MSG_BITS

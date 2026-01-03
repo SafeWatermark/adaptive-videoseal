@@ -147,8 +147,9 @@ class PolarWatermarkCodec(ECCCodec):
 
         if not self.is_power_of_two(self.total_bits):
             logger.warning(
-                f"total_bits={self.total_bits} is not a power of two. Polar decoding expects N=2^n; "
-                f"results may be unreliable."
+                f"total_bits={self.total_bits} is not a power of two. "
+                f"While 5G NR Polar code supports rate-matching for arbitrary lengths, "
+                f"performance may be slightly degraded compared to power-of-two lengths."
             )
 
         if self.total_bits < self.message_bits:
@@ -214,7 +215,7 @@ class PolarWatermarkCodec(ECCCodec):
         """
         if watermark_bits.ndim != 2 or watermark_bits.size(-1) < self.n:
             raise ValueError(
-                f"watermark_bits must be 1D with length >= {self.n}. "
+                f"watermark_bits must be 2D with shape (B, total_bits) where total_bits >= {self.n}. "
                 f"Got shape {watermark_bits.shape}."
             )
 
