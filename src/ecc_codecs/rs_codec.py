@@ -103,7 +103,7 @@ class RSWatermarkCodec(ECCCodec):
         """
         B = message_bits.size(0)
         if message_bits.ndim != 2:
-            raise ValueError(f"Exepcted 2 dimensions, got {message_bits.ndim}")
+            raise ValueError(f"Expected 2 dimensions, got {message_bits.ndim}")
         if message_bits.size(-1) != self.message_bits:
             raise ValueError(
                 f"Expected {self.message_bits} bits, got {message_bits.size(-1)}"
