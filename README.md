@@ -71,9 +71,9 @@ The **Adaptive VideoSeal** project supports not only the **VideoSeal** model but
 
 | Model          | Details                                                                                                                      |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **VideoSeal**  | The default model. It applies the Adaptive Pipeline based on Meta’s official VideoSeal 1.0 weights.                          |
+| **VideoSeal**  | The default model. It applies the Adaptive Pipeline based on Meta's official VideoSeal 1.0 weights.                          |
 | **StegaStamp** | Requires a separate ONNX model file (`stega_stamp.onnx`). <br> (For detailed setup, see **3.3 Using the StegaStamp Model**.) |
-| **REVMark**    | Coming soon. It will be integrated in a future update.                                                                       |
+| **REVMark**    | Requires ME_Spynet_Full.pth. <br> (For detailed setup, see **3.4 Using the REVMark Model**.)     |
 ---
 
 ### 3.2 Adaptive Watermarking Experiment
@@ -125,7 +125,23 @@ bash scripts/poc/stega_stamp/run_histogram_detector.sh   # Run experiment using 
 ...
 ```
 
-### 3.4 SA-V Validation Image-to-Video Conversion
+### 3.4 Using the REVMark Model
+
+To run inference with the REVMark model:
+
+1. **Initialize the git submodule**:
+   ```bash
+   git submodule update --init --recursive
+   ```
+   `Encoder.pth` and `Decoder.pth` will be placed automatically in `src/videomarkbench/REVMark/checkpoints/` directory
+
+2. **Download `ME_Spynet_Full.pth`:**
+   * Available from this repository's **GitHub Releases** section (v0.0.1).
+   * Place the file at the project root directory.
+
+Once prepared, you can use the REVMark model within the Adaptive VideoSeal environment.
+
+### 3.5 SA-V Validation Image-to-Video Conversion
 
 The SA-V validation dataset provides each sample as a **directory of JPEG frames**.
 To evaluate Adaptive VideoSeal on this dataset, you must first convert each frame
@@ -139,7 +155,7 @@ uv run scripts/sav_val_image2video.py --data_path <path_to_JPEGImages directory>
 
 This will generate an `.mp4` file for each directory of frames.
 
-### 3.5 Scene-Detector Threshold Experiments
+### 3.6 Scene-Detector Threshold Experiments
 
 * Use `src/threshold_experiment.py` to sweep scene-detector thresholds and watermark step sizes.
 

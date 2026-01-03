@@ -78,7 +78,7 @@ Adaptive VideoSeal 프로젝트는 **VideoSeal** 모델 외에도 **StegaStamp**
 | ------------- | -------------------------------------------------------------------------------------------------------------- |
 | **Videoseal**   | 기본 모델입니다. Meta의 공식 VideoSeal 1.0 가중치를 기반으로 Adaptive Pipeline을 적용합니다. |
 | **StegaStamp** | 별도의 ONNX 모델 파일(`stega_stamp.onnx`)이 필요합니다. <br> (자세한 설정은 **3.3 StegaStamp 모델 사용** 안내 참고). |
-| **REVMark**      | 지원 예정. 추후 업데이트를 통해 통합될 예정입니다. |
+| **REVMark**      | ME_Spynet_Full.pth 파일이 필요합니다. <br> (자세한 설정은 **3.4 REVMark 모델 사용** 안내 참고). |
 ---
 
 ### 3.2 Adaptive watermarking 실험
@@ -122,13 +122,28 @@ StegaStamp 모델의 추론(inference)을 위해서는 **`stega_stamp.onnx`** �
 #### 실행 스크립트
 
 ```bash
-```bash
 bash scripts/poc/stega_stamp/run_content_detector.sh     # content_detector를 활용한 experiment 실행
 bash scripts/poc/stega_stamp/run_histogram_detector.sh   # histogram detector를 활용한 experiment 실행
 ...
 ```
 
-### 3.4 SA-V validation 이미지 → 비디오 변환
+### 3.4 REVMark 모델 사용 안내
+
+REVMark 모델의 추론(inference)을 위해서는:
+
+1. **git submodule 초기화**:
+   ```bash
+   git submodule update --init --recursive
+   ```
+   `src/videomarkbench/REVMark/checkpoints/` 디렉토리에 `Encoder.pth`, `Decoder.pth`가 자동으로 다운로드됩니다.
+
+2. **`ME_Spynet_Full.pth` 다운로드:**
+   * 본 저장소의 **GitHub Releases** 섹션(v0.0.1)에서 다운로드할 수 있습니다.
+   * 프로젝트 루트 디렉터리에 파일을 저장하세요.
+
+파일을 준비하면 Adaptive VideoSeal 환경에서 REVMark 모델을 사용할 수 있습니다.
+
+### 3.5 SA-V validation 이미지 → 비디오 변환
 
 SA-V validation 데이터셋은 각 샘플이 **JPEG 이미지 시퀀스(프레임 폴더)** 형태로 제공됩니다.
 Adaptive VideoSeal로 평가하려면 먼저 이 이미지 프레임들을 MP4 비디오로 변환해야 합니다.
@@ -141,7 +156,7 @@ uv run scripts/sav_val_image2video.py --data_path <JPEGImages directory>
 
 각 폴더의 프레임을 하나의 `.mp4` 비디오로 자동 변환합니다.
 
-### 3.5 Scene-Detector Threshold Experiments
+### 3.6 Scene-Detector Threshold Experiments
 
 * `src/threshold_experiment.py`를 사용해 Scene-Detector Threshold(τ)와 step_size를 실험합니다.
 

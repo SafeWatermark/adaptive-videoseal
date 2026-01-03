@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -61,7 +64,7 @@ jobs:
           sudo apt-get install -y ffmpeg
 
       # -------------------------
-      # Cache onnx
+      # Cache models
       # -------------------------
       - name: Cache ONNX model
         id: cache-onnx
@@ -70,8 +73,15 @@ jobs:
           path: onnx/stega_stamp.onnx
           key: stega-stamp-v0.0.1
 
+      - name: Cache ME_Spynet_Full model
+        id: cache-spynet
+        uses: actions/cache@v3
+        with:
+          path: ME_Spynet_Full.pth
+          key: me-spynet-v0.0.1
+
       # ----------------------------
-      # Download ONNX only if cache is missing
+      # Download models only if cache is missing
       # ----------------------------
       - name: Download ONNX
         if: steps.cache-onnx.outputs.cache-hit != 'true'
@@ -85,6 +95,21 @@ jobs:
           FILE_SIZE=$(stat -c%s "onnx/stega_stamp.onnx")
           if [ "$FILE_SIZE" -lt 100000 ]; then
             echo "ERROR: Downloaded ONNX file is invalid or too small. Size: $FILE_SIZE bytes"
+            exit 1
+          fi
+
+      - name: Download ME_Spynet_Full.pth
+        if: steps.cache-spynet.outputs.cache-hit != 'true'
+        run: |
+          gh release download v0.0.1 \
+            --repo ${{ github.repository }} \
+            --pattern "ME_Spynet_Full.pth" \
+            --dir "."
+
+          # Check file size safely
+          FILE_SIZE=$(stat -c%s "ME_Spynet_Full.pth")
+          if [ "$FILE_SIZE" -lt 100000 ]; then
+            echo "ERROR: Downloaded ME_Spynet_Full.pth file is invalid or too small. Size: $FILE_SIZE bytes"
             exit 1
           fi
 

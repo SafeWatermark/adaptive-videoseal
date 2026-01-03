@@ -40,7 +40,7 @@ dependencies = [
 
 
 [tool.setuptools.packages.find]
-where = ["src/videoseal"]
+where = ["src/videoseal", "src/videomarkbench", "src/videomarkbench/REVMark"]
 
 [dependency-groups]
 dev = [
@@ -56,15 +56,17 @@ testpaths = ["tests"]
 [tool.coverage.run]
 source = ["src"]
 omit = [
-    "src/videoseal/*"
+    "src/videoseal/*",
+    "src/videomarkbench/*",
 ]
 
 
 [tool.ruff]
 exclude = [
     "src/videoseal",
-    "src/videomarkbench",
+    "src/videomarkbench/*",
     "src/notebooks",
+    "src/REVMark/__init__.py" # exclude to register system path properly
 ]
 
 [tool.ruff.lint]
