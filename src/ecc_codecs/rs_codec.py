@@ -20,9 +20,10 @@ Example:
 import torch
 from reedsolo import RSCodec, ReedSolomonError
 from torch.nn import functional as F
+from ecc_codecs.base import ECCCodec
 
 
-class RSWatermarkCodec:
+class RSWatermarkCodec(ECCCodec):
     """Reed-Solomon codec for watermark error correction.
 
     Designed for fixed watermark capacity.
@@ -31,7 +32,9 @@ class RSWatermarkCodec:
     The codec can correct up to (parity_bytes // 2) byte errors.
     """
 
-    def __init__(self, total_bits, message_bits: int, threshold: float = 0.5):
+    def __init__(
+        self, total_bits, message_bits: int, threshold: float = 0.5, *args, **kwargs
+    ):
         """Initialize RS codec for watermark.
 
         Args:
@@ -81,9 +84,9 @@ class RSWatermarkCodec:
             "message_bytes": self.message_bytes,
             "parity_bytes": self.parity_bytes,
             "parity_bits": self.parity_bytes * 8,
-            "rs_total_bytes": self.RS_BYTES,
+            "rs_total_bytes": self.rs_bytes,
             "error_correction_capacity_bytes": self.error_correction_capacity,
-            "total_bits": self.TOTAL_BITS,
+            "total_bits": self.total_bits,
         }
 
     def encode(self, message_bits: torch.Tensor) -> torch.Tensor:
@@ -100,7 +103,7 @@ class RSWatermarkCodec:
         """
         B = message_bits.size(0)
         if message_bits.ndim != 2:
-            raise ValueError(f"Exepcted 2 dimensions, got {message_bits.ndim}")
+            raise ValueError(f"Expected 2 dimensions, got {message_bits.ndim}")
         if message_bits.size(-1) != self.message_bits:
             raise ValueError(
                 f"Expected {self.message_bits} bits, got {message_bits.size(-1)}"

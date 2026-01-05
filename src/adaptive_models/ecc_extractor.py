@@ -1,6 +1,6 @@
 import torch
 from videoseal.models.extractor import Extractor
-from ecc_codecs.rs_codec import RSWatermarkCodec
+from ecc_codecs.base import ECCCodec
 import copy
 
 
@@ -9,6 +9,7 @@ class ECCExtractor(Extractor):
     def from_extractor(
         cls,
         model: Extractor,
+        ecc_codec: ECCCodec,
         total_bits: int,
         message_bits: int,
         threshold: float = 0.5,
@@ -27,7 +28,8 @@ class ECCExtractor(Extractor):
 
         new.total_bits = total_bits
         new.message_bits = message_bits
-        new.codec = RSWatermarkCodec(total_bits, message_bits, threshold)
+        new.threshold = threshold
+        new.codec = ecc_codec
         new.register_forward_hook(new._ecc_forward_hook)
 
         new.forward = model.forward
