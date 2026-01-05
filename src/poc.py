@@ -294,7 +294,8 @@ def run_experiment(args):
             ecc_kwargs["threshold"] = 0.0  # VideoSeal uses logits
         elif args.model == "stega_stamp":
             ecc_kwargs["total_bits"] = STEGA_STAMP_NUM_BITS
-            ecc_kwargs["threshold"] = 0.0  # StegaStamp uses binary
+            ecc_kwargs["threshold"] = 0.5  # StegaStamp uses binary
+            # ecc_kwargs["input_type"] = "sigmoid"
         elif args.model == "revmark":
             ecc_kwargs["total_bits"] = REVMARK_DEFAULT_MSG_BITS
             ecc_kwargs["threshold"] = 0.5  # RevMark uses sigmoid [0, 1]
@@ -369,6 +370,9 @@ def run_experiment(args):
             msgs_ori = ecc_decoded.squeeze()
 
         if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
+            # REVMark's decoder ends with a Sigmoid layer, outputting values in [0, 1].
+            # StegaStamp's decoder outputs binary codes (0 or 1)
+            # Thus, a threshold of 0.5 is explicitly required for bit accuracy.
             adaptive_bit_acc = (
                 bit_accuracy(
                     adaptive_soft_msgs, adaptive_msgs_ori, threshold=0.5
@@ -377,6 +381,8 @@ def run_experiment(args):
             )
             bit_acc = bit_accuracy(soft_msgs, msgs_ori, threshold=0.5).item() * 100
         else:
+            # VideoSeal 1.0 (ConvNextExtractor) and StegaStamp outputs raw logits from a linear layer by default.
+            # Bit accuracy is determined by the sign of the logits (threshold=0.0).
             adaptive_bit_acc = (
                 bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
             )

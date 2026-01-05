@@ -139,7 +139,9 @@ class TestDecode:
     def test_decode_wrong_shape_raises(self, codec):
         """Decode with wrong shape should raise ValueError."""
         wrong_shape = torch.zeros(1, 64, dtype=torch.float)
-        with pytest.raises(ValueError, match="must be 1D with length >= 128"):
+        with pytest.raises(
+            ValueError, match="must be 2D with shape.*total_bits >= 128"
+        ):
             codec.decode(wrong_shape)
 
     def test_decode_1d_array_raises(self, codec):
