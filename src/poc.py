@@ -242,9 +242,10 @@ def run_experiment(args):
     logger.info(f"Input dir: {input_dir}")
     logger.info(f"Output dir: {output_dir}")
 
+    model_kwargs = {"ecc_mode": args.ecc_mode}
     # Fixed model paths
     if args.model == "videoseal":
-        model = get_videoseal()
+        model = get_videoseal(**model_kwargs)
         model.blender.scaling_w = args.scaling_w
     elif args.model == "stega_stamp":
         if args.onnx_path is None:
@@ -255,7 +256,7 @@ def run_experiment(args):
                 "(original source: https://github.com/umd-huang-lab/WAVES/tree/main/decoders)."
             )
 
-        model = get_stega_stamp_videoseal(args.onnx_path)
+        model = get_stega_stamp_videoseal(args.onnx_path, **model_kwargs)
         if args.scaling_w != 1.0:
             logger.info(
                 f"'scaling_w' was set to {args.scaling_w}, but StegaStamp requires a 1:1 blend. "
@@ -272,6 +273,7 @@ def run_experiment(args):
         model = get_revmark_videoseal(
             os.path.join(revmark_path, "checkpoints/Encoder.pth"),
             os.path.join(revmark_path, "checkpoints/Decoder.pth"),
+            **model_kwargs,
         )
 
     model = model.eval().to(device)
@@ -336,7 +338,7 @@ def run_experiment(args):
         )
         logger.info("✅ [VideoSeal Model] Detection completed.")
 
-        if args.model == "revmark" or args.model == "stega_stamp":
+        if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
             # REVMark's decoder ends with a Sigmoid layer, outputting values in [0, 1].
             # StegaStamp's decoder outputs binary codes (0 or 1)
             # Thus, a threshold of 0.5 is explicitly required for bit accuracy.
@@ -434,6 +436,12 @@ if __name__ == "__main__":
         default="videoseal",
         choices=["videoseal", "stega_stamp", "revmark"],
         help="Watermarking model to use ('videoseal' or 'stega_stamp').",
+    )
+    parser.add_argument(
+        "--ecc_mode",
+        action="store_true",
+        default=False,
+        help="If set, use error correction code(ecc) for embedding and detecting",
     )
     parser.add_argument(
         "--onnx_path",

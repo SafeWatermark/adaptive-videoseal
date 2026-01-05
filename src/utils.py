@@ -15,14 +15,19 @@ from models.stega_stamp import (
     STEGA_STAMP_ATTENUATION,
     STEGA_STAMP_SCALING_W,
     STEGA_STAMP_SCALING_I,
+    STEGA_STAMP_NUM_BITS,
 )
 from models.revmark import (
     REVMARK_DEFAULT_WIDTH,
     REVMARK_ATTENUATION,
     REVMARK_SCALING_I,
     REVMARK_SCALING_W,
+    REVMARK_DEFAULT_MSG_BITS,
 )
 from videoseal.models import Videoseal
+
+from adaptive_models.ecc_embedder import ECCEmbedder
+from adaptive_models.ecc_extractor import ECCExtractor
 
 
 def setup_seed(seed: int):
@@ -75,9 +80,26 @@ def select_device(device_choice: str):
     return device
 
 
-def get_videoseal() -> Videoseal:
+def get_videoseal(ecc_mode: bool = False) -> Videoseal:
     current_path = Path(__file__).resolve().parent
     model = setup_model_from_model_card(current_path / "cards" / "videoseal_1.0.yml")
+    if ecc_mode:
+        total_bits = model.embedder.msg_processor.nbits
+        parity_bits = 16
+
+        message_bits = ((total_bits - parity_bits) // 8) * 8
+        model.embedder = ECCEmbedder.from_embedder(
+            model.embedder,
+            total_bits=total_bits,
+            message_bits=message_bits,
+            threshold=0.0,
+        )
+        model.detector = ECCExtractor.from_extractor(
+            model.detector,
+            total_bits=total_bits,
+            message_bits=message_bits,
+            threshold=0.0,
+        )
     return model
 
 
@@ -121,7 +143,7 @@ def patch_ffmpeg_path(
         logging.info("[patch_ffmpeg_path] Restored original subprocess.run")
 
 
-def get_stega_stamp_videoseal(onnx_path: str) -> Videoseal:
+def get_stega_stamp_videoseal(onnx_path: str, ecc_mode: bool = False) -> Videoseal:
     """
     Configure a VideoSeal model to use StegaStamp for watermark embedding and extraction.
 
@@ -147,6 +169,23 @@ def get_stega_stamp_videoseal(onnx_path: str) -> Videoseal:
     model.embedder = StegaStampEmbedder(onnx_path)
     model.detector = StegaStampExtractor(onnx_path)
 
+    if ecc_mode:
+        total_bits = STEGA_STAMP_NUM_BITS
+        parity_bits = 16
+        message_bits = ((total_bits - parity_bits) // 8) * 8
+        model.embedder = ECCEmbedder.from_embedder(
+            model.embedder,
+            total_bits=total_bits,
+            message_bits=message_bits,
+            threshold=0.0,
+        )
+        model.detector = ECCExtractor.from_extractor(
+            model.detector,
+            total_bits=total_bits,
+            message_bits=message_bits,
+            threshold=0.0,
+        )
+
     model.img_size = STEGA_STAMP_IMAGE_WIDTH
     model.attenuation = STEGA_STAMP_ATTENUATION
     model.blender.scaling_i = STEGA_STAMP_SCALING_I
@@ -154,7 +193,9 @@ def get_stega_stamp_videoseal(onnx_path: str) -> Videoseal:
     return model
 
 
-def get_revmark_videoseal(encoder_path: str, decoder_path: str) -> Videoseal:
+def get_revmark_videoseal(
+    encoder_path: str, decoder_path: str, ecc_mode: bool = False
+) -> Videoseal:
     """
     Configure a VideoSeal model to use REVMark for watermark embedding and extraction.
 
@@ -175,6 +216,23 @@ def get_revmark_videoseal(encoder_path: str, decoder_path: str) -> Videoseal:
     model = get_videoseal()
     model.embedder = REVMarkEmbedder(encoder_path)
     model.detector = REVMarkExtractor(decoder_path)
+
+    if ecc_mode:
+        total_bits = REVMARK_DEFAULT_MSG_BITS
+        parity_bits = 16
+        message_bits = ((total_bits - parity_bits) // 8) * 8
+        model.embedder = ECCEmbedder.from_embedder(
+            model.embedder,
+            total_bits=total_bits,
+            message_bits=message_bits,
+            threshold=0.5,
+        )
+        model.detector = ECCExtractor.from_extractor(
+            model.detector,
+            total_bits=total_bits,
+            message_bits=message_bits,
+            threshold=0.5,
+        )
 
     model.img_size = REVMARK_DEFAULT_WIDTH
     model.attenuation = REVMARK_ATTENUATION
