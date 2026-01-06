@@ -11,22 +11,21 @@ from models.revmark import (
     REVMARK_RESIDUAL_SCALE,
     REVMARK_FRAME_SIZE,
 )
+from videoseal.modules.msg_processor import MsgProcessor
 
 
 class StegaStampEmbedder(Embedder):
     TARGET_SIZE = (STEGA_STAMP_IMAGE_HEIGHT, STEGA_STAMP_IMAGE_WIDTH)
 
-    def __init__(
-        self,
-        onnx_path: str,
-    ) -> None:
+    def __init__(self, onnx_path: str, msg_processor: MsgProcessor) -> None:
         super(StegaStampEmbedder, self).__init__()
         self.stega_stamp_encoder = ONNXStegaStampEncoder(onnx_path)
         self.yuv = False
+        self.msg_processor = msg_processor
+        self.msg_processor.nbits = self.stega_stamp_encoder.num_bits
 
     def get_random_msg(self, bsz: int = 1, nb_repetitions=1) -> torch.Tensor:
-        nbits = self.stega_stamp_encoder.num_bits
-        return torch.randint(0, 2, (bsz, nbits))
+        return self.msg_processor.get_random_msg(bsz, nb_repetitions)  # b x k
 
     def _preprocess(self, imgs: torch.Tensor):
         """
@@ -127,6 +126,7 @@ class REVMarkEmbedder(Embedder):
     def __init__(
         self,
         encoder_path: str,
+        msg_processor: MsgProcessor,
         msg_bits: int = REVMARK_DEFAULT_MSG_BITS,
         perturbation_epsilon: float = 0.0,
         watermark_mode: str = "per_block",
@@ -157,7 +157,8 @@ class REVMarkEmbedder(Embedder):
             REVMARK_DEFAULT_WIDTH,
         ]
         self.target_size = (self.video_shape[1], self.video_shape[2])
-        self.msg_bits = msg_bits
+        self.msg_processor = msg_processor
+        self.msg_processor.nbits = msg_bits
         self.perturbation_epsilon = perturbation_epsilon
         self.yuv = False  # REVMark works on RGB
         self.watermark_mode = watermark_mode
@@ -173,9 +174,8 @@ class REVMarkEmbedder(Embedder):
         self.encoder.tasblock.enable = True
         self._framenorm = framenorm
 
-    def get_random_msg(self, bsz: int = 1, nb_repetitions: int = 1) -> torch.Tensor:
-        """Generate random message bits."""
-        return torch.randint(0, 2, (bsz, self.msg_bits))
+    def get_random_msg(self, bsz: int = 1, nb_repetitions=1) -> torch.Tensor:
+        return self.msg_processor.get_random_msg(bsz, nb_repetitions)  # b x k
 
     def _temporal_pad(self, frames: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
         """

@@ -39,6 +39,7 @@ dependencies = [
     "easydict>=1.13",
     "sionna>=0.8.0",
     "tensorflow[and-cuda]>=2.20.0",
+    "pydantic-settings>=2.12.0",
 ]
 
 
