@@ -350,7 +350,7 @@ class CodecManager:
 
     def apply_codecs(
         self, model: Videoseal, adaptive_model: AdaptiveVideoseal
-    ) -> tuple[AdaptiveVideoseal, Videoseal]:
+    ) -> tuple[Videoseal, AdaptiveVideoseal]:
         """Apply ECC and/or MAC transformations to models."""
         if self.args.mac_mode:
             return self._apply_mac_transforms(model, adaptive_model)
@@ -360,7 +360,7 @@ class CodecManager:
 
     def _apply_mac_transforms(
         self, model: Videoseal, adaptive_model: AdaptiveVideoseal
-    ) -> tuple[AdaptiveVideoseal, Videoseal]:
+    ) -> tuple[Videoseal, AdaptiveVideoseal]:
         """Apply MAC authentication to models."""
         mac_kwargs = {
             "message_bits": self.args.message_bits,
