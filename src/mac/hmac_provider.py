@@ -4,6 +4,7 @@ import hashlib
 import torch
 from mac.configs import mac_settings
 from pydantic_settings import BaseSettings
+from typing import Literal
 
 
 class HMACProvider(MACProvider):
@@ -15,17 +16,24 @@ class HMACProvider(MACProvider):
         self.config = config
         self.hmac_tag = self._compute_truncated_hmac_tag()
 
+        self.verification_results: list = []
+
         if self.tag_bits <= 0:
             raise ValueError("tag_bits must be positive")
 
         BYTE = 8
         max_tag_bits = len(config.MAC_SECRET_KEY) * BYTE
 
+        self._sigmoid_range_margin = 0.05  # Margin for sigmoid detection
+
         if tag_bits > max_tag_bits:
             raise ValueError(
                 f"tag_bits must be less than or equal to the MAC secret key size in bits. "
                 f"tag_bits={tag_bits}, MAC_SECRET_KEY_bits={max_tag_bits}"
             )
+
+    def clear_results(self):
+        self.verification_results = []
 
     def build_authenticated_payload_bits(
         self, message_bits: torch.Tensor
@@ -47,7 +55,6 @@ class HMACProvider(MACProvider):
                 f"Expected {self.message_bits} bits, got {message_bits.size(-1)}"
             )
 
-        self.hmac_tag = self._compute_truncated_hmac_tag()  # (tag_bits,)
         if self.hmac_tag.size(0) != self.tag_bits:
             raise RuntimeError("Tag size mismatch (internal error)")
 
@@ -90,24 +97,26 @@ class HMACProvider(MACProvider):
         tag_bits does not need to be divisible by 8.
         """
         digest_tensor = torch.frombuffer(bytearray(digest), dtype=torch.uint8).clone()
-        digest_tensor = digest_tensor.unsqueeze(0)  # (tag_bits,) -> (1, tag_bits)
+        # digest is SHA-256 = 32 bytes = 256 bits
+        digest_tensor = digest_tensor.unsqueeze(0)  # (32,) -> (1, 32)
         digest_bits = self._bytes_to_bits(
             digest_tensor
-        ).squeeze()  # (1, tag_bits) -> (tag_bits,)
+        ).squeeze()  #  (1, 32) -> (1, 256) -> (256,)
         if tag_bits > digest_bits.size(-1):
             raise ValueError(
                 f"tag_bits exceeds digest size, expected {tag_bits}, got {digest_bits.size(-1)}"
             )
-        return digest_bits[:tag_bits]
+        return digest_bits[:tag_bits]  # (tag_bits,)
 
     def verify_tag(
         self,
         payload_bits: torch.Tensor,
+        input_type: Literal["auto", "sigmoid", "logits"] = "auto",
     ) -> torch.Tensor:
         """
         Verify payload authenticity:
         - Extract (message_bits, tag_bits)
-        - Recompute tag from decoded message
+        - Recompute tag from shared password
         - Constant-time compare in bit space
 
         Args:
@@ -119,6 +128,16 @@ class HMACProvider(MACProvider):
 
         _, tag_bits = self.split_payload_bits(payload_bits)
 
+        detected_type = self._detect_input_type(tag_bits, input_type)
+
+        # Convert to LLRs based on input type
+        if detected_type == "sigmoid":
+            threshold = 0.5
+        else:  # logits
+            threshold = 0.0
+
+        tag_bits = (tag_bits > threshold).to(torch.uint8)
+
         expected_tag = self.hmac_tag
 
         if expected_tag.ndim == 1:
@@ -129,7 +148,7 @@ class HMACProvider(MACProvider):
             return torch.zeros(
                 tag_bits.size(0), dtype=torch.bool, device=payload_bits.device
             )
-
+        # TODO: Threshold if soft message
         diff = (tag_bits.to(torch.uint8) ^ expected_tag.to(torch.uint8)).sum(
             dim=-1
         )  # [B]
@@ -143,3 +162,36 @@ class HMACProvider(MACProvider):
         message = payload_bits[:, : self.message_bits]
         tag = payload_bits[:, self.message_bits : self.message_bits + self.tag_bits]
         return message, tag
+
+    # TODO: Copy & pasted from polar_codec.py. Consider to use this communal utility
+    def _detect_input_type(
+        self, values: torch.Tensor, specified: str
+    ) -> Literal["sigmoid", "logits"]:
+        """
+        Detect whether input values are sigmoid probabilities or raw logits.
+
+        Args:
+            values: Input array
+            specified: User-specified type ("auto", "sigmoid", "logits")
+
+        Returns:
+            Detected type: "sigmoid" or "logits"
+        """
+        if specified == "sigmoid":
+            return "sigmoid"
+        elif specified == "logits":
+            return "logits"
+        else:  # auto
+            min_val, max_val = float(values.min()), float(values.max())
+
+            # Check if values are within sigmoid range [0, 1] with margin
+            if (
+                min_val >= -self._sigmoid_range_margin
+                and max_val <= 1.0 + self._sigmoid_range_margin
+            ):
+                # Additional check: if all values are very close to 0 or 1,
+                # they might still be hard logits
+                if min_val >= 0.0 and max_val <= 1.0:
+                    return "sigmoid"
+
+            return "logits"
