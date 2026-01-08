@@ -85,9 +85,9 @@ class RSWatermarkCodec(ECCCodec):
             "message_bytes": self.message_bytes,
             "parity_bytes": self.parity_bytes,
             "parity_bits": self.parity_bytes * 8,
-            "rs_total_bytes": self.RS_BYTES,
+            "rs_total_bytes": self.rs_bytes,
             "error_correction_capacity_bytes": self.error_correction_capacity,
-            "total_bits": self.TOTAL_BITS,
+            "total_bits": self.total_bits,
         }
 
     def encode(self, message_bits: torch.Tensor) -> torch.Tensor:
@@ -104,7 +104,7 @@ class RSWatermarkCodec(ECCCodec):
         """
         B = message_bits.size(0)
         if message_bits.ndim != 2:
-            raise ValueError(f"Exepcted 2 dimensions, got {message_bits.ndim}")
+            raise ValueError(f"Expected 2 dimensions, got {message_bits.ndim}")
         if message_bits.size(-1) != self.message_bits:
             raise ValueError(
                 f"Expected {self.message_bits} bits, got {message_bits.size(-1)}"

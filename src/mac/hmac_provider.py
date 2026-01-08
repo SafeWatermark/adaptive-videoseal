@@ -25,6 +25,8 @@ class HMACProvider(MACProvider):
         BYTE = 8
         max_tag_bits = len(config.MAC_SECRET_KEY) * BYTE
 
+        self._sigmoid_range_margin = 0.05  # Margin for sigmoid detection
+
         if tag_bits > max_tag_bits:
             raise ValueError(
                 f"tag_bits must be less than or equal to the MAC secret key size in bits. "
@@ -96,15 +98,16 @@ class HMACProvider(MACProvider):
         tag_bits does not need to be divisible by 8.
         """
         digest_tensor = torch.frombuffer(bytearray(digest), dtype=torch.uint8).clone()
-        digest_tensor = digest_tensor.unsqueeze(0)  # (tag_bits,) -> (1, tag_bits)
+        # digest is SHA-256 = 32 bytes = 256 bits
+        digest_tensor = digest_tensor.unsqueeze(0)  # (32,) -> (1, 32)
         digest_bits = self._bytes_to_bits(
             digest_tensor
-        ).squeeze()  # (1, tag_bits) -> (tag_bits,)
+        ).squeeze()  #  (1, 32) -> (1, 256) -> (256,)
         if tag_bits > digest_bits.size(-1):
             raise ValueError(
                 f"tag_bits exceeds digest size, expected {tag_bits}, got {digest_bits.size(-1)}"
             )
-        return digest_bits[:tag_bits]
+        return digest_bits[:tag_bits]  # (tag_bits,)
 
     def verify_tag(
         self,
@@ -114,7 +117,7 @@ class HMACProvider(MACProvider):
         """
         Verify payload authenticity:
         - Extract (message_bits, tag_bits)
-        - Recompute tag from decoded message
+        - Recompute tag from shared password
         - Constant-time compare in bit space
 
         Args:
