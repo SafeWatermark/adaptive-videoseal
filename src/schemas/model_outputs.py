@@ -51,6 +51,13 @@ class ModelType(str, Enum):
     REVMARK = "revmark"
 
 
+MODEL_TO_VALUE_TYPE = {
+    ModelType.VIDEOSEAL: OutputValueType.LOGITS,
+    ModelType.STEGASTAMP: OutputValueType.BINARY,
+    ModelType.REVMARK: OutputValueType.SIGMOID,
+}
+
+
 @dataclass(frozen=True)
 class ThresholdConfig:
     """Configuration for value-to-bit conversion thresholds.
@@ -97,12 +104,7 @@ class ThresholdConfig:
         Returns:
             ThresholdConfig with appropriate settings for the model.
         """
-        model_to_value_type = {
-            ModelType.VIDEOSEAL: OutputValueType.LOGITS,
-            ModelType.STEGASTAMP: OutputValueType.BINARY,
-            ModelType.REVMARK: OutputValueType.SIGMOID,
-        }
-        value_type = model_to_value_type[model_type]
+        value_type = MODEL_TO_VALUE_TYPE[model_type]
         return cls.for_value_type(value_type)
 
 

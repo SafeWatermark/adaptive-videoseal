@@ -1,5 +1,8 @@
 import torch
 from videoseal.models.extractor import Extractor
+from hooks.utils import infer_input_type_by_module
+from hooks.ecc_hooks import ecc_forward_hook
+from schemas.model_outputs import OutputValueType
 
 
 def mac_forward_hook(module: Extractor, input, output) -> torch.Tensor:
@@ -18,11 +21,25 @@ def mac_forward_hook(module: Extractor, input, output) -> torch.Tensor:
     payload_bits = output[:, 1:]  # message || tag
 
     message_bits, _ = module.mac_provider.split_payload_bits(payload_bits)
-    verification = module.mac_provider.verify_tag(payload_bits)
+
+    input_type = infer_input_type_by_module(module)
+
+    # If ecc_forward_hook runs before this hook, input_type should be BINARY
+    # (ECC decode converts soft messages to binary)
+    for hook_fn in getattr(module, "_forward_hooks", {}).values():
+        if hook_fn is mac_forward_hook:
+            break
+        if hook_fn is ecc_forward_hook:
+            input_type = OutputValueType.BINARY
+            break
+
+    verification = module.mac_provider.verify_tag(payload_bits, input_type)
     module.mac_provider.verification_results.extend(verification.tolist())
 
     # Compute MAC probability as bit-match ratio (e.g., 28/32 = 0.875)
-    mac_probability = module.mac_provider.compute_tag_match_ratio(payload_bits)
+    mac_probability = module.mac_provider.compute_tag_match_ratio(
+        payload_bits, input_type
+    )
     mac_probability = mac_probability.unsqueeze(1)
 
     # Combine probabilities using scaling factors
