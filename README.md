@@ -85,10 +85,12 @@ Use the `--ecc_mode` flag to enable error correction for watermark messages. Thi
 | -------- | ----------- |
 | **rs** | Reed-Solomon code. Classic algebraic ECC with configurable redundancy. |
 | **polar** | 5G NR Polar code via Sionna. Supports SC, SCL, BP decoders with soft-input decoding for better noise resilience. |
+| **conv** | Convolutional code with Viterbi decoding via Sionna. Supports rate 1/2, 1/3 and constraint lengths 3-8. Effective for burst error correction. |
 
 ```bash
 uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=polar ...    # Polar code
-uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ... # Rees-Solmon code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=rs ...       # Reed-Solomon code
+uv run python src/poc.py --model videoseal --ecc_mode --ecc_codec=conv ...     # Convolutional code
 ```
 
 
