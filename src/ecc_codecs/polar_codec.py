@@ -41,6 +41,8 @@ import tensorflow as tf
 
 from sionna.fec.polar import Polar5GEncoder, Polar5GDecoder
 from ecc_codecs.base import ECCCodec
+from schemas.converters import ValueConverter
+from schemas.model_outputs import OutputValueType
 import torch
 import logging
 
@@ -119,10 +121,6 @@ class PolarWatermarkCodec(ECCCodec):
             decoder_kwargs["num_iter"] = self.num_iter
 
         self.decoder = Polar5GDecoder(**decoder_kwargs)
-
-        # Internal constants
-        self._llr_max = 20.0  # Clip LLRs to avoid numerical issues
-        self._sigmoid_range_margin = 0.05  # Margin for sigmoid detection
 
     @property
     def info(self) -> dict:
@@ -222,15 +220,16 @@ class PolarWatermarkCodec(ECCCodec):
         # Take only the bits used for Polar coding
         polar_bits = watermark_bits[:, : self.n]
 
-        # Detect or use specified input type
-        detected_type = self._detect_input_type(polar_bits, input_type)
+        # Detect or use specified input type using unified ValueConverter
+        detected_type = ValueConverter.detect_value_type(polar_bits, input_type)
 
-        # Convert to LLRs based on input type
-        if detected_type == "sigmoid":
-            llr = self._sigmoid_to_llr(polar_bits)
+        # Convert to LLRs using unified ValueConverter
+        llr = ValueConverter.to_llr(polar_bits, detected_type)
+
+        # Compute confidence based on value type
+        if detected_type == OutputValueType.SIGMOID:
             confidence = self._compute_confidence_sigmoid(polar_bits)
         else:  # logits
-            llr = self._clip_llr(polar_bits)
             confidence = self._compute_confidence_logits(polar_bits)
 
         # torch -> tf
@@ -248,61 +247,6 @@ class PolarWatermarkCodec(ECCCodec):
         if return_confidence:
             return u_hat, bit_errors, confidence
         return u_hat, bit_errors
-
-    def _detect_input_type(
-        self, values: torch.Tensor, specified: str
-    ) -> Literal["sigmoid", "logits"]:
-        """
-        Detect whether input values are sigmoid probabilities or raw logits.
-
-        Args:
-            values: Input array
-            specified: User-specified type ("auto", "sigmoid", "logits")
-
-        Returns:
-            Detected type: "sigmoid" or "logits"
-        """
-        if specified == "sigmoid":
-            return "sigmoid"
-        elif specified == "logits":
-            return "logits"
-        else:  # auto
-            min_val, max_val = float(values.min()), float(values.max())
-
-            # Check if values are within sigmoid range [0, 1] with margin
-            if (
-                min_val >= -self._sigmoid_range_margin
-                and max_val <= 1.0 + self._sigmoid_range_margin
-            ):
-                # Additional check: if all values are very close to 0 or 1,
-                # they might still be hard logits
-                if min_val >= 0.0 and max_val <= 1.0:
-                    return "sigmoid"
-
-            return "logits"
-
-    def _sigmoid_to_llr(self, p: torch.Tensor) -> torch.Tensor:
-        """
-        Convert sigmoid probabilities to LLRs.
-
-        LLR = log(p / (1 - p)) where p = P(bit = 1)
-        - p close to 1 → large positive LLR → bit=1 likely
-        - p close to 0 → large negative LLR → bit=0 likely
-
-        Args:
-            p: Sigmoid probabilities in [0, 1]
-
-        Returns:
-            LLR values (clipped for numerical stability)
-        """
-        eps = 1e-7
-        p_clipped = torch.clamp(p, eps, 1.0 - eps)
-        llr = torch.log(p_clipped / (1.0 - p_clipped))
-        return self._clip_llr(llr)
-
-    def _clip_llr(self, llr: torch.Tensor) -> torch.Tensor:
-        """Clip LLR values to avoid numerical issues."""
-        return torch.clamp(llr, -self._llr_max, self._llr_max)
 
     def _compute_confidence_sigmoid(self, p: torch.Tensor) -> list[float]:
         """

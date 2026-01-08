@@ -38,6 +38,36 @@ from utils import (
 )
 from models.stega_stamp import STEGA_STAMP_NUM_BITS
 from models.revmark import REVMARK_DEFAULT_MSG_BITS
+from schemas import create_meta_for_model
+from mac.registry import mac_provider_registry
+from mac.configs import mac_settings
+
+
+def get_model_config(model_name: str, model: Videoseal) -> dict:
+    """Get model-specific configuration using schema utilities.
+
+    Args:
+        model_name: Name of the model ("videoseal", "stega_stamp", "revmark")
+        model: The model instance to get nbits from (for videoseal)
+
+    Returns:
+        dict with 'total_bits', 'threshold', and 'meta' keys
+    """
+    if model_name == "videoseal":
+        total_bits = model.embedder.msg_processor.nbits
+    elif model_name == "stega_stamp":
+        total_bits = STEGA_STAMP_NUM_BITS
+    elif model_name == "revmark":
+        total_bits = REVMARK_DEFAULT_MSG_BITS
+    else:
+        raise ValueError(f"Unknown model: {model_name}")
+
+    meta = create_meta_for_model(model_name, nbits=total_bits)
+    return {
+        "total_bits": total_bits,
+        "threshold": meta.threshold,
+        "meta": meta,
+    }
 
 
 def get_video_info(input_path):
@@ -289,8 +319,10 @@ def run_experiment(args):
     model.video_mode = args.video_mode
     adaptive_model = AdaptiveVideoseal.from_videoseal(model)
 
-    from mac.registry import mac_provider_registry
-    from mac.configs import mac_settings
+    # Get model configuration using schema utilities
+    model_config = get_model_config(args.model, model)
+    total_bits = model_config["total_bits"]
+    threshold = model_config["threshold"]
 
     if args.mac_mode:
         mac_provider_kwargs = {
@@ -299,15 +331,6 @@ def run_experiment(args):
             "config": mac_settings,
         }
 
-        if args.model == "videoseal":
-            total_bits = model.embedder.msg_processor.nbits
-            threshold = 0.0  # VideoSeal uses logits
-        elif args.model == "stega_stamp":
-            total_bits = STEGA_STAMP_NUM_BITS
-            threshold = 0.0  # StegaStamp uses binary
-        elif args.model == "revmark":
-            total_bits = REVMARK_DEFAULT_MSG_BITS
-            threshold = 0.5  # RevMark uses sigmoi
         if args.ecc_mode:
             # mac_provider & adaptive_mac_provider are same configuration each other, but to store the verification results, instantiate different object
             # TODO: Consider how to store verification results
@@ -350,18 +373,13 @@ def run_experiment(args):
             )
 
     elif args.ecc_mode:
-        # TODO: Consider how to place the device of ecc codec(espcailly PolarWatermarkCodec as TensorFlow)
-        ecc_kwargs = {"message_bits": args.message_bits}  # Common default
-        if args.model == "videoseal":
-            ecc_kwargs["total_bits"] = model.embedder.msg_processor.nbits
-            ecc_kwargs["threshold"] = 0.0  # VideoSeal uses logits
-        elif args.model == "stega_stamp":
-            ecc_kwargs["total_bits"] = STEGA_STAMP_NUM_BITS
-            ecc_kwargs["threshold"] = 0.5  # StegaStamp uses binary
-            # ecc_kwargs["input_type"] = "sigmoid"
-        elif args.model == "revmark":
-            ecc_kwargs["total_bits"] = REVMARK_DEFAULT_MSG_BITS
-            ecc_kwargs["threshold"] = 0.5  # RevMark uses sigmoid [0, 1]
+        # TODO: Consider how to place the device of ecc codec(especially PolarWatermarkCodec as TensorFlow)
+        # Use model configuration from schema utilities (already defined above)
+        ecc_kwargs = {
+            "message_bits": args.message_bits,
+            "total_bits": total_bits,
+            "threshold": threshold,
+        }
 
         ecc_codec = ecc_codec_registry.get(
             args.ecc_codec, ecc_codec_registry["default"]
@@ -474,25 +492,25 @@ def run_experiment(args):
 
             mac_provider.clear_results()
 
-        # calculate averaged soft message accuracy
-        if args.model == "revmark" or args.model == "stega_stamp" or args.ecc_mode:
-            # REVMark's decoder ends with a Sigmoid layer, outputting values in [0, 1].
-            # StegaStamp's decoder outputs binary codes (0 or 1)
-            # Thus, a threshold of 0.5 is explicitly required for bit accuracy.
-            adaptive_bit_acc = (
-                bit_accuracy(
-                    adaptive_soft_msgs, adaptive_msgs_ori, threshold=0.5
-                ).item()
-                * 100
-            )
-            bit_acc = bit_accuracy(soft_msgs, msgs_ori, threshold=0.5).item() * 100
+        # Calculate averaged soft message accuracy using schema-defined threshold
+        # After ECC/MAC processing, outputs are in sigmoid/binary space (threshold 0.5)
+        # Only raw VideoSeal output uses logits (threshold 0.0)
+        if args.ecc_mode or args.mac_mode:
+            # ECC/MAC decoded outputs are in binary space
+            bit_acc_threshold = 0.5
         else:
-            # VideoSeal 1.0 (ConvNextExtractor) and StegaStamp outputs raw logits from a linear layer by default.
-            # Bit accuracy is determined by the sign of the logits (threshold=0.0).
-            adaptive_bit_acc = (
-                bit_accuracy(adaptive_soft_msgs, adaptive_msgs_ori).item() * 100
-            )
-            bit_acc = bit_accuracy(soft_msgs, msgs_ori).item() * 100
+            # Use model-specific threshold from schema
+            bit_acc_threshold = threshold
+
+        adaptive_bit_acc = (
+            bit_accuracy(
+                adaptive_soft_msgs, adaptive_msgs_ori, threshold=bit_acc_threshold
+            ).item()
+            * 100
+        )
+        bit_acc = (
+            bit_accuracy(soft_msgs, msgs_ori, threshold=bit_acc_threshold).item() * 100
+        )
 
         logger.info(
             f"bit_acc = {bit_acc:.2f}%, adaptive_bit_acc = {adaptive_bit_acc:.2f}%"

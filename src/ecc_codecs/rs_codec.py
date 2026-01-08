@@ -21,6 +21,7 @@ import torch
 from reedsolo import RSCodec, ReedSolomonError
 from torch.nn import functional as F
 from ecc_codecs.base import ECCCodec
+from schemas.converters import ValueConverter
 
 
 class RSWatermarkCodec(ECCCodec):
@@ -130,13 +131,17 @@ class RSWatermarkCodec(ECCCodec):
         return encoded_bits
 
     def decode(
-        self, watermark_bits: torch.Tensor, return_confidence: bool = False
+        self,
+        watermark_bits: torch.Tensor,
+        return_confidence: bool = False,
+        input_type: str = "auto",
     ) -> tuple[torch.Tensor, list[int]] | tuple[torch.Tensor, list[int], list[float]]:
         """Decode watermark bits with RS error correction.
 
         Args:
             watermark_bits(B, total_bits,): tensor of values (0-1 range, soft or hard)
             return_confidence: If True, also return confidence score
+            input_type: Input interpretation mode ("auto", "sigmoid", "logits", "binary")
 
         Returns:
             message_bits: (B, message_bits,) corrected message bits (0s and 1s)
@@ -155,15 +160,17 @@ class RSWatermarkCodec(ECCCodec):
 
         rs_bits = watermark_bits[:, : self.rs_bits]
 
+        # Detect input type using unified ValueConverter
+        detected_type = ValueConverter.detect_value_type(rs_bits, input_type)
+
         # Compute confidence from soft values before hard decision
         if return_confidence:
-            # Confidence = how far from 0.5 the values are (average)
-            confidence = torch.mean(
-                torch.abs(rs_bits - self.threshold) * 2, dim=0
-            ).tolist()
+            # Confidence = how far from threshold the values are (average)
+            threshold = ValueConverter.get_threshold(detected_type)
+            confidence = torch.mean(torch.abs(rs_bits - threshold) * 2, dim=0).tolist()
 
-        # Convert to hard decisions
-        hard_bits = rs_bits > self.threshold
+        # Convert to hard decisions using ValueConverter
+        hard_bits = ValueConverter.to_binary(rs_bits, detected_type)
 
         # Convert bits to bytes
         encoded_bytes_list = self._bits_to_bytes(hard_bits)
