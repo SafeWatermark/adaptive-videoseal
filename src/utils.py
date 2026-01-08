@@ -121,7 +121,7 @@ def transform_ecc_videoseal(
 def transform_authenticated_videoseal(
     model: Videoseal | AdaptiveVideoseal,
     mac_provider: MACProvider,
-):
+) -> Videoseal | AdaptiveVideoseal:
     """
 
     Embed: message_bits → [MAC tag attach] → embed into image/video
@@ -140,13 +140,14 @@ def transform_authenticated_videoseal(
     model.embedder.msg_processor = msg_processor
     model.detector.register_forward_hook(mac_forward_hook)
     setattr(model.detector, "mac_provider", mac_provider)
+    setattr(model.detector, "mac_verification_results", [])
 
     return model
 
 
 def transform_authenticated_ecc_videoseal(
     model: Videoseal | AdaptiveVideoseal, ecc_codec: ECCCodec, mac_provider: MACProvider
-):
+) -> Videoseal | AdaptiveVideoseal:
     """
     Embed: message_bits → [MAC: append tag] → [ECC encode] → embed
     Extract: extract → [ECC decode] → [MAC: verify & strip tag] → message_bits + verification_status
@@ -168,6 +169,7 @@ def transform_authenticated_ecc_videoseal(
     model.detector.register_forward_hook(mac_forward_hook)
     setattr(model.detector, "mac_provider", mac_provider)
     setattr(model.detector, "ecc_codec", ecc_codec)
+    setattr(model.detector, "mac_verification_results", [])
 
     return model
 
