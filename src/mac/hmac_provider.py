@@ -25,8 +25,6 @@ class HMACProvider(MACProvider):
         BYTE = 8
         max_tag_bits = len(config.MAC_SECRET_KEY) * BYTE
 
-        self._sigmoid_range_margin = 0.05  # Margin for sigmoid detection
-
         if tag_bits > max_tag_bits:
             raise ValueError(
                 f"tag_bits must be less than or equal to the MAC secret key size in bits. "
