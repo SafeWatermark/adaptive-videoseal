@@ -156,6 +156,16 @@ def main():
         help="Maximum frames per video (None = all)",
     )
 
+    # Pre-computed perturbations
+    parser.add_argument(
+        "--precomputed_dir",
+        type=str,
+        default=None,
+        help="Path to pre-computed perturbations directory. "
+        "If provided, forgery attacks will load pre-computed perturbed videos. "
+        "Generate with: python scripts/precompute_perturbations.py",
+    )
+
     # Evaluation arguments
     parser.add_argument(
         "--evaluate_common",
@@ -352,6 +362,9 @@ def main():
                 max_frames_per_video=args.max_frames_per_video,
                 evaluate_forgery=True,
                 kinetics_dataset=kinetics_dataset,
+                precomputed_dir=Path(args.precomputed_dir)
+                if args.precomputed_dir
+                else None,
             )
             # Load statistics if available
             stats_file = output_dir / "common_perturbations_stats.json"
