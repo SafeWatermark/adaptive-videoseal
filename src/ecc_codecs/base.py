@@ -8,7 +8,13 @@ class ECCCodec(ABC):
     """
 
     def __init__(
-        self, total_bits: int, message_bits: int, threshold: float, *args, **kwargs
+        self,
+        total_bits: int,
+        message_bits: int,
+        threshold: float,
+        device: torch.device,
+        *args,
+        **kwargs,
     ):
         raise NotImplementedError
 

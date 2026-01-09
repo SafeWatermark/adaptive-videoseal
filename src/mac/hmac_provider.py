@@ -20,12 +20,14 @@ class HMACProvider(MACProvider):
         tag_bits: int,
         config: BaseSettings = mac_settings,
         detection_scaling: DetectionProbabilityScaling = DetectionProbabilityScaling(),
+        device: torch.device = torch.device("cpu"),
     ):
         self.message_bits = message_bits
         self.tag_bits = tag_bits
         self.config = config
         self.detection_scaling = detection_scaling
-        self.hmac_tag = self._compute_truncated_hmac_tag()
+        self.device = device
+        self.hmac_tag = self._compute_truncated_hmac_tag().to(self.device)
 
         if self.tag_bits <= 0:
             raise ValueError("tag_bits must be positive")
