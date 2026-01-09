@@ -359,3 +359,49 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - **제거 공격**은 VideoMarkBench 데이터셋 사용 (생성형 AI 비디오)
 - **위조 공격**은 Kinetics 데이터셋 사용 (실제 비디오)
 - `--kinetics_dataset`이 지정되지 않으면 위조 공격도 제거 공격과 동일한 데이터셋 사용 (하위 호환성)
+
+**Blackbox Attacks:**
+
+```bash
+# Square Attack (removal + forgery)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/blackbox_eval \
+    --max_videos 40 \
+    --max_frames_per_video 14 \
+    --evaluate_blackbox_removal \
+    --evaluate_blackbox_forgery \
+    --blackbox_attack_method square \
+    --eps 0.05 \
+    --n_iters 500
+
+# Triangle Attack (removal only)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --output_dir outputs/blackbox_eval \
+    --max_videos 40 \
+    --max_frames_per_video 14 \
+    --evaluate_blackbox_removal \
+    --blackbox_attack_method triangle \
+    --eps 0.05 \
+    --n_iters 500
+```
+
+**주요 인자:**
+- `--evaluate_blackbox_removal`: Removal 공격 평가 활성화
+- `--evaluate_blackbox_forgery`: Forgery 공격 평가 활성화
+- `--blackbox_attack_method`: `square` 또는 `triangle` (기본값: `square`)
+- `--eps`: Perturbation bound (L-infinity norm) (기본값: 0.05)
+- `--n_iters`: 최대 반복 횟수 (기본값: 500)
+- `--p_init`: Square Attack 초기 패치 크기 (기본값: 0.05)
+
+**공격 타입:**
+- **Square Attack**: 점수 기반 blackbox 공격 (Linf norm)
+- **Triangle Attack**: 라벨 기반 blackbox 공격 (DCT 기반 2D 서브스페이스 탐색)
+
+**주의사항:**
+- Triangle Attack은 `torch_dct` 패키지가 필요합니다 (`uv add torch-dct`)
+- 계산 비용이 크므로 생성 모델과 스타일 조합당 40개의 비디오만 사용하는 것을 권장합니다

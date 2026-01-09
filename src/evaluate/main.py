@@ -27,6 +27,7 @@ from evaluate.model_wrapper import VideoMarkBenchModel  # noqa: E402
 from evaluate.dataset_loader import VideoMarkBenchDataset  # noqa: E402
 from evaluate.common_evaluator import evaluate_common_perturbations  # noqa: E402
 from evaluate.whitebox_evaluator import evaluate_whitebox_attacks  # noqa: E402
+from evaluate.blackbox_evaluator import evaluate_blackbox_attacks  # noqa: E402
 
 
 def setup_model(
@@ -179,6 +180,13 @@ def main():
         action="store_true",
         default=False,
         help="Evaluate whitebox attacks (WEvade)",
+    )
+    parser.add_argument(
+        "--blackbox_attack_method",
+        type=str,
+        default="square",
+        choices=["square", "triangle"],
+        help="Blackbox attack method: 'square' or 'triangle' (default: 'square')",
     )
 
     # Whitebox attack parameters
@@ -378,21 +386,83 @@ def main():
                 f"Error in common perturbations evaluation: {e}", exc_info=True
             )
 
-    # 2. Blackbox forgery attacks (TODO: implement)
-    if args.evaluate_blackbox_forgery:
+    # 2. Blackbox attacks
+    if args.evaluate_blackbox_forgery or args.evaluate_blackbox_removal:
         logger.info("=" * 50)
-        logger.info("Evaluating Blackbox Forgery Attacks")
+        logger.info("Evaluating Blackbox Attacks")
         logger.info("=" * 50)
-        logger.warning("Blackbox forgery attacks evaluation not yet implemented")
-        # TODO: Implement blackbox forgery evaluation
+        try:
+            # Recreate iterator for blackbox evaluation (iterator may be exhausted from common evaluation)
+            if selected_files is not None:
+                blackbox_dataset = dataset.get_selected_videos(selected_files)
+            else:
+                blackbox_dataset = dataset
 
-    # 3. Blackbox removal attacks (TODO: implement)
-    if args.evaluate_blackbox_removal:
-        logger.info("=" * 50)
-        logger.info("Evaluating Blackbox Removal Attacks")
-        logger.info("=" * 50)
-        logger.warning("Blackbox removal attacks evaluation not yet implemented")
-        # TODO: Implement blackbox removal evaluation
+            # Recreate kinetics dataset iterator for blackbox (may be exhausted from common evaluation)
+            blackbox_kinetics_dataset = None
+            if kinetics_dataset_obj is not None:
+                # Recreate iterator for kinetics dataset
+                if (
+                    args.max_videos
+                    and args.max_videos < len(kinetics_dataset_obj)
+                    and selected_kinetics_files is not None
+                ):
+                    blackbox_kinetics_dataset = (
+                        kinetics_dataset_obj.get_selected_videos(
+                            selected_kinetics_files
+                        )
+                    )
+                else:
+                    blackbox_kinetics_dataset = kinetics_dataset_obj
+
+            blackbox_results = evaluate_blackbox_attacks(
+                model=model,
+                dataset=blackbox_dataset,
+                output_dir=output_dir,
+                logger=logger,
+                max_videos=args.max_videos,
+                max_frames_per_video=args.max_frames_per_video,
+                attack_method=args.blackbox_attack_method
+                if hasattr(args, "blackbox_attack_method")
+                else "square",
+                evaluate_forgery=args.evaluate_blackbox_forgery,
+                evaluate_removal=args.evaluate_blackbox_removal,
+                kinetics_dataset=blackbox_kinetics_dataset,
+                eps=0.05,
+                n_iters=1000,
+                p_init=0.05,
+            )
+            # Load statistics if available
+            stats_file = output_dir / "blackbox_stats.json"
+            stats = {}
+            if stats_file.exists():
+                with open(stats_file, "r") as f:
+                    stats = json.load(f)
+
+            all_results["blackbox"] = {
+                "file": str(output_dir / "blackbox_results.csv"),
+                "stats_file": str(stats_file),
+                "count": len(blackbox_results),
+                "statistics": stats,
+                "attack_method": "square",
+            }
+            logger.info(
+                f"Blackbox attacks evaluation completed: {len(blackbox_results)} results"
+            )
+
+            # Log statistics
+            if stats and "overall" in stats:
+                overall = stats["overall"]
+                if "FNR" in overall:
+                    logger.info(
+                        f"Overall FNR (False Negative Rate): {overall['FNR']:.4f} ({overall.get('FNR_count', 0)}/{overall.get('removal_total', 0)})"
+                    )
+                if "FPR" in overall:
+                    logger.info(
+                        f"Overall FPR (False Positive Rate): {overall['FPR']:.4f} ({overall.get('FPR_count', 0)}/{overall.get('forgery_total', 0)})"
+                    )
+        except Exception as e:
+            logger.error(f"Error in blackbox attacks evaluation: {e}", exc_info=True)
 
     # 4. Whitebox attacks
     if args.evaluate_whitebox:

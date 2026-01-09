@@ -162,14 +162,53 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - **Removal 공격**: 워터마크가 삽입된 비디오에 perturbation을 적용한 후 워터마크가 여전히 검출되는지 확인 (FNR 측정)
 - **Forgery 공격**: 워터마크가 없는 원본 비디오에 perturbation을 적용한 후 워터마크가 잘못 검출되는지 확인 (FPR 측정)
 
-### Blackbox Attacks (향후 구현 예정)
+### Blackbox Attacks (구현 완료)
 
 - **Forgery Attacks**: 원본 비디오에 워터마크를 위조하는 공격
-  - Square Attack forgery
-  - Triangle Attack forgery
+  - Square Attack forgery: 점수 기반 공격 (l_norm 0.05 이하로 제한)
+  - Triangle Attack forgery: 라벨 기반 공격 (DCT 기반 2D 서브스페이스 탐색)
 - **Removal Attacks**: 워터마크가 있는 비디오에서 워터마크를 제거하는 공격
-  - Square Attack removal
-  - Triangle Attack removal
+  - Square Attack removal: 점수 기반 공격 (l_norm 0.05 이하로 제한)
+  - Triangle Attack removal: 라벨 기반 공격 (DCT 기반 2D 서브스페이스 탐색)
+
+**데이터셋 사용:**
+- **Removal 공격**: VideoMarkBench 데이터셋 사용 (SVD로 생성된 realistic 스타일 비디오, BA-mean aggregation 기본 사용)
+- **Forgery 공격**: Kinetics-400 데이터셋 사용 (40개 비디오, 14 프레임, BA-mean aggregation)
+
+**파라미터:**
+- `--blackbox_attack_method`: `square` 또는 `triangle` (기본값: `square`)
+- `--evaluate_blackbox_removal`: Removal 공격 평가 활성화
+- `--evaluate_blackbox_forgery`: Forgery 공격 평가 활성화
+- `--max_frames_per_video`: 평가할 최대 프레임 수 (Forgery의 경우 기본값: 14)
+
+**실행 예시:**
+```bash
+# Square Attack (removal + forgery)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --kinetics_dataset data/kinetics/videos \
+    --output_dir outputs/blackbox_eval \
+    --max_videos 40 \
+    --max_frames_per_video 14 \
+    --evaluate_blackbox_removal \
+    --evaluate_blackbox_forgery \
+    --blackbox_attack_method square
+
+# Triangle Attack (removal only)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --output_dir outputs/blackbox_eval \
+    --max_videos 40 \
+    --max_frames_per_video 14 \
+    --evaluate_blackbox_removal \
+    --blackbox_attack_method triangle
+```
+
+**주의사항:**
+- Triangle Attack은 `torch_dct` 패키지가 필요합니다 (`uv add torch-dct`)
+- 계산 비용이 크므로 생성 모델과 스타일 조합당 40개의 비디오만 사용하는 것을 권장합니다
 
 ### Whitebox Attacks (구현 완료)
 
