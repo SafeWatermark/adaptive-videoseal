@@ -29,6 +29,7 @@ from precompute_perturbations import (
     get_perturbation_configs,
     get_video_files,
     process_single_video,
+    setup_seed,
 )
 
 
@@ -776,3 +777,252 @@ class TestProcessSingleVideoDevice:
         saved_file = output_dir / "Gaussian_0.01" / "test_video.pt"
         data = torch.load(saved_file)
         assert data["video"].device == torch.device("cpu")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+class TestCPUGPUConsistency:
+    """Tests for CPU vs GPU result consistency."""
+
+    @pytest.fixture
+    def sample_video(self):
+        """Create a sample video tensor."""
+        # (T, C, H, W) format, values in [0, 1]
+        setup_seed(42)
+        return torch.rand(8, 3, 64, 64)
+
+    def test_gaussian_blur_cpu_gpu_identical(self, sample_video):
+        """Test GaussianBlur produces identical results on CPU and GPU."""
+        config = PerturbationConfig("GaussianBlur_1.0", "GaussianBlur", {"std": 1.0})
+
+        # CPU
+        pert_cpu = create_perturbation(config)
+        result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+
+        # GPU
+        video_gpu = sample_video.cuda()
+        pert_gpu = create_perturbation(config)
+        result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+        result_gpu_cpu = result_gpu.cpu()
+
+        # Should be identical (deterministic operation)
+        assert torch.allclose(result_cpu, result_gpu_cpu, atol=1e-5)
+
+    def test_frame_average_cpu_gpu_identical(self, sample_video):
+        """Test FrameAverage produces identical results on CPU and GPU."""
+        config = PerturbationConfig("FrameAverage_2", "FrameAverage", {"num_frames": 2})
+
+        # CPU
+        pert_cpu = create_perturbation(config)
+        result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+
+        # GPU
+        video_gpu = sample_video.cuda()
+        pert_gpu = create_perturbation(config)
+        result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+        result_gpu_cpu = result_gpu.cpu()
+
+        # Should be identical (deterministic operation)
+        assert torch.allclose(result_cpu, result_gpu_cpu, atol=1e-5)
+
+    def test_frame_remove_cpu_gpu_identical(self, sample_video):
+        """Test FrameRemove produces identical results on CPU and GPU with same seed."""
+        config = PerturbationConfig("FrameRemove_0.1", "FrameRemove", {"p": 0.1})
+
+        # CPU
+        setup_seed(42)
+        pert_cpu = create_perturbation(config)
+        result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+
+        # GPU
+        setup_seed(42)
+        video_gpu = sample_video.cuda()
+        pert_gpu = create_perturbation(config)
+        result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+        result_gpu_cpu = result_gpu.cpu()
+
+        # Should have same shape and values
+        assert result_cpu.shape == result_gpu_cpu.shape
+        assert torch.allclose(result_cpu, result_gpu_cpu, atol=1e-5)
+
+    def test_frame_switch_cpu_gpu_identical(self, sample_video):
+        """Test FrameSwitch produces identical results on CPU and GPU with same seed."""
+        config = PerturbationConfig("FrameSwitch_0.1", "FrameSwitch", {"p": 0.1})
+
+        # CPU
+        setup_seed(42)
+        pert_cpu = create_perturbation(config)
+        result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+
+        # GPU
+        setup_seed(42)
+        video_gpu = sample_video.cuda()
+        pert_gpu = create_perturbation(config)
+        result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+        result_gpu_cpu = result_gpu.cpu()
+
+        # Should be identical
+        assert torch.allclose(result_cpu, result_gpu_cpu, atol=1e-5)
+
+    def test_gaussian_cpu_gpu_different_but_valid(self, sample_video):
+        """Test Gaussian noise differs between CPU and GPU (expected behavior).
+
+        Gaussian noise uses different RNGs on CPU vs GPU, so results will differ
+        but should have similar statistical properties.
+        """
+        config = PerturbationConfig("Gaussian_0.05", "Gaussian", {"std": 0.05})
+
+        # CPU
+        setup_seed(42)
+        pert_cpu = create_perturbation(config)
+        result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+
+        # GPU
+        setup_seed(42)
+        video_gpu = sample_video.cuda()
+        pert_gpu = create_perturbation(config)
+        result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+        result_gpu_cpu = result_gpu.cpu()
+
+        # Results will differ (different RNGs)
+        # But both should be valid (in range, correct shape)
+        assert result_cpu.shape == result_gpu_cpu.shape
+        assert result_cpu.min() >= 0.0
+        assert result_cpu.max() <= 1.0
+        assert result_gpu_cpu.min() >= 0.0
+        assert result_gpu_cpu.max() <= 1.0
+
+        # Compute difference - expected to be non-zero
+        diff = torch.abs(result_cpu - result_gpu_cpu)
+        # Max diff should be roughly proportional to noise std
+        # For std=0.05, max diff could be up to ~0.4 (multiple std deviations)
+        assert diff.max() > 0  # Confirm they're different
+        assert diff.max() < 1.0  # But not completely different
+
+    def test_gaussian_statistical_properties_similar(self, sample_video):
+        """Test that Gaussian noise has similar statistical properties on CPU and GPU."""
+        config = PerturbationConfig("Gaussian_0.05", "Gaussian", {"std": 0.05})
+        std = 0.05
+
+        # CPU
+        setup_seed(42)
+        pert_cpu = create_perturbation(config)
+        result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+        noise_cpu = result_cpu - sample_video
+
+        # GPU
+        setup_seed(42)
+        video_gpu = sample_video.cuda()
+        pert_gpu = create_perturbation(config)
+        result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+        noise_gpu = (result_gpu - video_gpu).cpu()
+
+        # Both should have similar mean (close to 0) and std (close to configured std)
+        # Note: clamping affects the distribution at boundaries
+        assert abs(noise_cpu.mean().item()) < std  # Mean should be near 0
+        assert abs(noise_gpu.mean().item()) < std
+
+        # Std should be close to configured value (may be slightly less due to clamping)
+        assert abs(noise_cpu.std().item() - std) < std * 0.5
+        assert abs(noise_gpu.std().item() - std) < std * 0.5
+
+    def test_all_deterministic_perturbations_match(self, sample_video):
+        """Test all deterministic GPU-capable perturbations match between CPU and GPU."""
+        deterministic_configs = [
+            PerturbationConfig("GaussianBlur_1.0", "GaussianBlur", {"std": 1.0}),
+            PerturbationConfig("GaussianBlur_2.0", "GaussianBlur", {"std": 2.0}),
+            PerturbationConfig("FrameAverage_2", "FrameAverage", {"num_frames": 2}),
+            PerturbationConfig("FrameAverage_3", "FrameAverage", {"num_frames": 3}),
+        ]
+
+        video_gpu = sample_video.cuda()
+
+        for config in deterministic_configs:
+            # CPU
+            pert_cpu = create_perturbation(config)
+            result_cpu = apply_perturbation(pert_cpu, sample_video, config)
+
+            # GPU
+            pert_gpu = create_perturbation(config)
+            result_gpu = apply_perturbation(pert_gpu, video_gpu, config)
+            result_gpu_cpu = result_gpu.cpu()
+
+            assert torch.allclose(
+                result_cpu, result_gpu_cpu, atol=1e-5
+            ), f"{config.name} results differ between CPU and GPU"
+
+    def test_gpu_speedup_exists_for_frame_operations(self, sample_video):
+        """Test that GPU provides speedup for frame operations (smoke test)."""
+        import time
+
+        # Use larger video for meaningful timing
+        large_video = torch.rand(32, 3, 256, 256)
+        large_video_gpu = large_video.cuda()
+
+        config = PerturbationConfig("FrameAverage_2", "FrameAverage", {"num_frames": 2})
+
+        # CPU timing
+        pert_cpu = create_perturbation(config)
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        _ = apply_perturbation(pert_cpu, large_video, config)
+        cpu_time = time.perf_counter() - start
+
+        # GPU timing
+        pert_gpu = create_perturbation(config)
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        _ = apply_perturbation(pert_gpu, large_video_gpu, config)
+        torch.cuda.synchronize()
+        gpu_time = time.perf_counter() - start
+
+        # GPU should be faster (or at least not much slower)
+        # Using a loose threshold since CI environments may vary
+        assert (
+            gpu_time < cpu_time * 2
+        ), f"GPU ({gpu_time:.3f}s) much slower than CPU ({cpu_time:.3f}s)"
+
+    def test_process_single_video_cpu_gpu_output_equivalent(self):
+        """Test that process_single_video produces equivalent outputs for deterministic perturbations."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test video
+            import cv2
+
+            H, W, C = 64, 64, 3
+            F = 8
+            video_path = temp_path / "test.mp4"
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(str(video_path), fourcc, 30, (H, W))
+            for _ in range(F):
+                frame = np.full((H, W, C), 128, dtype=np.uint8)
+                out.write(frame)
+            out.release()
+
+            # Process with CPU
+            output_cpu = temp_path / "output_cpu"
+            output_cpu.mkdir()
+            configs = [
+                PerturbationConfig("GaussianBlur_1.0", "GaussianBlur", {"std": 1.0}),
+                PerturbationConfig("FrameAverage_2", "FrameAverage", {"num_frames": 2}),
+            ]
+            process_single_video(video_path, output_cpu, configs, seed=42, device="cpu")
+
+            # Process with GPU
+            output_gpu = temp_path / "output_gpu"
+            output_gpu.mkdir()
+            process_single_video(
+                video_path, output_gpu, configs, seed=42, device="cuda"
+            )
+
+            # Compare outputs
+            for config in configs:
+                cpu_file = output_cpu / config.get_dir_name() / "test.pt"
+                gpu_file = output_gpu / config.get_dir_name() / "test.pt"
+
+                data_cpu = torch.load(cpu_file)
+                data_gpu = torch.load(gpu_file)
+
+                assert torch.allclose(
+                    data_cpu["video"], data_gpu["video"], atol=1e-5
+                ), f"{config.name} outputs differ between CPU and GPU processing"
