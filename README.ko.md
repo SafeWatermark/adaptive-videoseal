@@ -442,6 +442,49 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - **Square Attack**: 점수 기반 blackbox 공격 (Linf norm)
 - **Triangle Attack**: 라벨 기반 blackbox 공격 (DCT 기반 2D 서브스페이스 탐색)
 
+**성능 옵션:**
+- `--parallel`: Common perturbations에 대해 다중 GPU 병렬 평가 활성화 (3-4배 속도 향상)
+- `--num_gpus`: 병렬 평가에 사용할 GPU 수 (미지정 시 자동 감지)
+- `--fast_aggregation`: 8개 대신 상위 2개 집계 전략만 사용 (logit_mean, bit_majority) (~75% 빠른 집계)
+
+**병렬 평가 예시:**
+```bash
+# 다중 GPU 병렬 평가 (4 GPU)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --evaluate_common \
+    --parallel \
+    --num_gpus 4
+
+# 축소된 집계 전략으로 빠른 평가
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --evaluate_common \
+    --fast_aggregation
+```
+
+**병렬 성능 벤치마크:**
+
+순차 모드 vs 병렬 모드 성능 비교 및 결과 검증:
+
+```bash
+# 벤치마크 실행 (순차 vs 병렬 비교, 결과 일치 검증)
+PYTHONPATH=src uv run python scripts/benchmark_parallel.py \
+    --dataset data/videomarkbench \
+    --max_videos 5 \
+    --num_gpus 4
+```
+
+벤치마크 스크립트는 타이밍 비교와 속도 향상 비율을 출력합니다:
+```
+Sequential time: 245.32 seconds
+Parallel time:   68.45 seconds
+Speedup: 3.58x
+Results match: YES
+```
+
 **주의사항:**
 - Triangle Attack은 `torch_dct` 패키지가 필요합니다 (`uv add torch-dct`)
 - 계산 비용이 크므로 생성 모델과 스타일 조합당 40개의 비디오만 사용하는 것을 권장합니다

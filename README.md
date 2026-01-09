@@ -419,6 +419,49 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - `--wevade_version`: `standard` or `adaptive` (default: `standard`)
 - `--wevade_rb`: Perturbation bound (L-infinity norm) (default: 0.1)
 
+**Performance Options:**
+- `--parallel`: Enable multi-GPU parallel evaluation for common perturbations (3-4x speedup)
+- `--num_gpus`: Number of GPUs to use for parallel evaluation (auto-detect if not specified)
+- `--fast_aggregation`: Use only top 2 aggregation strategies (logit_mean, bit_majority) instead of 8 (~75% faster aggregation)
+
+**Parallel Evaluation Example:**
+```bash
+# Multi-GPU parallel evaluation (4 GPUs)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --evaluate_common \
+    --parallel \
+    --num_gpus 4
+
+# Fast evaluation with reduced aggregation strategies
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --evaluate_common \
+    --fast_aggregation
+```
+
+**Benchmarking Parallel Performance:**
+
+To compare sequential vs parallel performance and verify results:
+
+```bash
+# Run benchmark (compares sequential vs parallel, verifies results match)
+PYTHONPATH=src uv run python scripts/benchmark_parallel.py \
+    --dataset data/videomarkbench \
+    --max_videos 5 \
+    --num_gpus 4
+```
+
+The benchmark script will output timing comparison and speedup ratio:
+```
+Sequential time: 245.32 seconds
+Parallel time:   68.45 seconds
+Speedup: 3.58x
+Results match: YES
+```
+
 **Note:**
 - **Removal attacks** use the VideoMarkBench dataset (generated AI videos)
 - **Forgery attacks** use the Kinetics dataset (real-world videos)

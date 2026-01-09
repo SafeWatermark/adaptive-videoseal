@@ -28,6 +28,7 @@ from evaluate.dataset_loader import VideoMarkBenchDataset  # noqa: E402
 from evaluate.common_evaluator import evaluate_common_perturbations  # noqa: E402
 from evaluate.whitebox_evaluator import evaluate_whitebox_attacks  # noqa: E402
 from evaluate.blackbox_evaluator import evaluate_blackbox_attacks  # noqa: E402
+from evaluate.parallel_evaluator import evaluate_common_perturbations_parallel  # noqa: E402
 
 
 def setup_model(
@@ -268,6 +269,26 @@ def main():
         help="Random seed for reproducibility",
     )
 
+    # Parallel processing arguments
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help="Enable multi-GPU parallel evaluation for common perturbations",
+    )
+    parser.add_argument(
+        "--num_gpus",
+        type=int,
+        default=None,
+        help="Number of GPUs to use for parallel evaluation (auto-detect if None)",
+    )
+    parser.add_argument(
+        "--fast_aggregation",
+        action="store_true",
+        default=False,
+        help="Use only top 2 aggregation strategies (logit_mean, bit_majority) for faster evaluation",
+    )
+
     args = parser.parse_args()
 
     # Setup
@@ -354,18 +375,51 @@ def main():
         logger.info("Evaluating Common Perturbations")
         logger.info("=" * 50)
         try:
-            common_results = evaluate_common_perturbations(
-                model=model,
-                dataset=selected_dataset,
-                output_dir=output_dir,
-                logger=logger,
-                max_frames_per_video=args.max_frames_per_video,
-                evaluate_forgery=True,
-                kinetics_dataset=kinetics_dataset,
-                precomputed_dir=Path(args.precomputed_dir)
-                if args.precomputed_dir
-                else None,
-            )
+            if args.parallel:
+                # Use parallel multi-GPU evaluation
+                logger.info(
+                    f"Using parallel evaluation with {args.num_gpus or 'auto'} GPUs"
+                )
+
+                # Prepare model args for worker processes
+                model_args = {
+                    "step_size": args.step_size,
+                    "scaling_w": args.scaling_w,
+                    "video_mode": args.video_mode,
+                    "chunk_size": args.chunk_size,
+                    "scene_detector": args.scene_detector,
+                }
+
+                common_results = evaluate_common_perturbations_parallel(
+                    model_name=args.model,
+                    model_args=model_args,
+                    dataset=selected_dataset,
+                    output_dir=output_dir,
+                    logger=logger,
+                    num_gpus=args.num_gpus,
+                    max_frames_per_video=args.max_frames_per_video,
+                    evaluate_forgery=True,
+                    kinetics_dataset=kinetics_dataset,
+                    precomputed_dir=Path(args.precomputed_dir)
+                    if args.precomputed_dir
+                    else None,
+                    fast_aggregation=args.fast_aggregation,
+                )
+            else:
+                # Use sequential single-GPU evaluation
+                common_results = evaluate_common_perturbations(
+                    model=model,
+                    dataset=selected_dataset,
+                    output_dir=output_dir,
+                    logger=logger,
+                    max_frames_per_video=args.max_frames_per_video,
+                    evaluate_forgery=True,
+                    kinetics_dataset=kinetics_dataset,
+                    precomputed_dir=Path(args.precomputed_dir)
+                    if args.precomputed_dir
+                    else None,
+                    fast_aggregation=args.fast_aggregation,
+                )
             # Load statistics if available
             stats_file = output_dir / "common_perturbations_stats.json"
             stats = {}
