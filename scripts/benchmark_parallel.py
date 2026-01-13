@@ -47,15 +47,6 @@ def run_evaluation(
         if num_gpus:
             cmd.extend(["--num_gpus", str(num_gpus)])
 
-    env = {"PYTHONPATH": "src"}
-    env.update(
-        dict(
-            item.split("=")
-            for item in subprocess.os.environ.items()
-            if "=" not in item[0]
-        )
-    )
-
     print(f"\n{'='*60}")
     print(f"Running {mode.upper()} mode...")
     print(f"Command: {' '.join(cmd)}")
@@ -64,7 +55,6 @@ def run_evaluation(
     start_time = time.time()
     result = subprocess.run(
         cmd,
-        env={**subprocess.os.environ, "PYTHONPATH": "src"},
         capture_output=False,
     )
     elapsed = time.time() - start_time
