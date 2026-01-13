@@ -612,15 +612,17 @@ def evaluate_common_perturbations(
                                 )
                             except Exception as e:
                                 logger.warning(
-                                    f"Error loading pre-computed {pert_dir_name}/{forgery_video_stem} "
+                                    f"Error loading pre-computed {pert_dir_name}/{forgery_video_stem}.pt."
                                     f"({display_name}): {e}"
                                 )
                                 perturbed_original = None
                         else:
                             logger.warning(
-                                f"Precomputed data not found for {pert_dir_name}/{forgery_video_stem}. "
-                                f"This may occur if precompute_perturbations.py was run "
-                                f"with different videos(e.g., `max_video` setting can make to select different videos)."
+                                f"Precomputed data not found for {pert_dir_name}/{forgery_video_stem}.pt."
+                                "This can occur if precompute_perturbations.py was run with a different video subset "
+                                "(e.g., due to a different `max_video` setting). "
+                                "Ensure that the same random seed and `max_video` arguments are used for both "
+                                "precompute_perturbations.py and common_evaluation. "
                                 "Falling back to inline perturbation."
                             )
 

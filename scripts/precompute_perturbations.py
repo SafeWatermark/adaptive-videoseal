@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import random
 
 import torch
 from tqdm import tqdm
@@ -450,11 +451,12 @@ CPU-only perturbations: JPEG, Crop, MPEG4
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Get video files
+    # Use random.sample with seed to match main.py selection logic
     video_files = get_video_files(dataset_path)
-    if args.max_videos:
-        video_files = video_files[: args.max_videos]
-
-    if not video_files:
+    if args.max_videos and args.max_videos < len(video_files):
+        random.seed(args.seed)
+        video_files = random.sample(video_files, args.max_videos)
+        video_files.sort()  # Sort for consistent ordering    if not video_files:
         print(f"No video files found in {dataset_path}")
         sys.exit(1)
 
@@ -469,6 +471,8 @@ CPU-only perturbations: JPEG, Crop, MPEG4
     print(f"Output: {output_dir}")
     print(f"Videos: {len(video_files)}")
     print(f"Device: {device}")
+    if args.max_videos and args.max_videos < len(get_video_files(dataset_path)):
+        print(f"  (randomly sampled with seed={args.seed} to match main.py)")
     if device.startswith("cuda"):
         gpu_perts = [
             c.name for c in all_configs if c.class_name in GPU_CAPABLE_PERTURBATIONS
