@@ -330,6 +330,46 @@ data/
       {label}_{youtube_id}_{time_start}.mp4
 ```
 
+#### Perturbation 사전 계산 (선택사항)
+
+빠른 평가를 위해 perturbation을 디스크에 미리 계산해 둘 수 있습니다. 동일한 데이터셋으로 여러 번 평가를 수행할 때 특히 유용합니다.
+
+```bash
+# 모든 perturbation 사전 계산 (CPU, 병렬 모드)
+PYTHONPATH=src uv run python scripts/precompute_perturbations.py \
+    --dataset data/videomarkbench \
+    --output_dir data/precomputed_perturbations \
+    --workers 8
+
+# GPU 가속을 사용한 사전 계산 (GPU 사용 시 순차 모드 필수)
+PYTHONPATH=src uv run python scripts/precompute_perturbations.py \
+    --dataset data/videomarkbench \
+    --output_dir data/precomputed_perturbations \
+    --sequential \
+    --device cuda
+```
+
+**옵션:**
+- `--dataset`: 비디오 데이터셋 디렉토리 경로
+- `--output_dir`: 사전 계산된 perturbation 저장 디렉토리
+- `--workers`: 병렬 워커 수 (기본값: 4, 병렬 모드에서만 사용)
+- `--sequential`: 모든 perturbation을 순차적으로 처리 (GPU 사용 시 필수)
+- `--device`: GPU 지원 perturbation용 장치: `cpu`, `cuda`, `cuda:0` 등 (기본값: `cpu`)
+- `--max_videos`: 처리할 최대 비디오 수 (기본값: 전체)
+
+**GPU 지원 perturbation:** Gaussian, GaussianBlur, FrameAverage, FrameRemove, FrameSwitch
+**CPU 전용 perturbation:** JPEG, Crop, MPEG4
+
+이후 평가 실행 시 `--precomputed_dir`을 사용하세요:
+
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --precomputed_dir data/precomputed_perturbations \
+    --evaluate_common
+```
+
 #### 평가 실행
 
 **Common Perturbations 및 Whitebox Attacks:**

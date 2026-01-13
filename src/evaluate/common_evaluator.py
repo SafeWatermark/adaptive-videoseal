@@ -352,6 +352,39 @@ def get_common_perturbations(temp_dir: Optional[Path] = None) -> List[torch.nn.M
     return perturbations
 
 
+def _get_perturbation_dir_name(pert: torch.nn.Module) -> str:
+    """
+    Get directory name for a perturbation (matches precompute_perturbations.py naming).
+
+    Args:
+        pert: Perturbation module instance
+
+    Returns:
+        Directory name string (e.g., 'JPEG_90', 'Gaussian_0.01')
+    """
+    class_name = type(pert).__name__.replace("Wrapper", "")
+
+    if class_name == "JPEG":
+        return f"JPEG_{pert.quality}"
+    elif class_name == "Gaussian":
+        return f"Gaussian_{pert.noise_level}"
+    elif class_name == "GaussianBlur":
+        std = pert.sigma[0] if isinstance(pert.sigma, tuple) else pert.sigma
+        return f"GaussianBlur_{std}"
+    elif class_name == "Crop":
+        return f"Crop_{pert.crop_ratio}"
+    elif class_name == "MPEG4":
+        return f"MPEG4_{pert.quality}"
+    elif class_name == "FrameAverage":
+        return f"FrameAverage_{pert.m}"
+    elif class_name == "FrameRemove":
+        return f"FrameRemove_{pert.p}"
+    elif class_name == "FrameSwitch":
+        return f"FrameSwitch_{pert.p}"
+    else:
+        return class_name
+
+
 def evaluate_common_perturbations(
     model,
     dataset: Iterator[Tuple[torch.Tensor, Dict]],
@@ -361,6 +394,7 @@ def evaluate_common_perturbations(
     max_frames_per_video: Optional[int] = None,
     evaluate_forgery: bool = True,
     kinetics_dataset: Optional[Iterator[Tuple[torch.Tensor, Dict]]] = None,
+    precomputed_dir: Optional[Path] = None,
 ) -> pd.DataFrame:
     """
     Evaluate model under common perturbations.
@@ -373,6 +407,13 @@ def evaluate_common_perturbations(
         max_videos: Maximum number of videos to evaluate
         max_frames_per_video: Maximum frames per video
         evaluate_forgery: Whether to evaluate forgery attacks (default: True)
+        kinetics_dataset: Optional kinetics dataset for forgery attacks
+        precomputed_dir: Optional path to pre-computed perturbations directory.
+            If provided, forgery attacks will load pre-computed perturbed videos
+            instead of applying perturbations inline. This speeds up evaluation
+            since forgery attacks skip duplicated perturbation works for each watermark model.
+            Pre-computed perturbations can be generated using:
+            python scripts/precompute_perturbations.py
 
     Returns:
         DataFrame with evaluation results
@@ -393,6 +434,8 @@ def evaluate_common_perturbations(
         logger.info(f"Evaluating {len(perturbations)} common perturbations")
         if evaluate_forgery:
             logger.info("Evaluating both removal and forgery attacks")
+        if precomputed_dir:
+            logger.info(f"Using pre-computed perturbations from: {precomputed_dir}")
 
         video_count = 0
         kinetics_iter = None
@@ -550,17 +593,51 @@ def evaluate_common_perturbations(
                         # Fallback: use same dataset (for backward compatibility)
                         forgery_video = video
 
-                    # Apply perturbation to original (unwatermarked) video
-                    with torch.no_grad():
-                        try:
-                            perturbed_original = _apply_perturbation(
-                                pert, forgery_video, pert_name
-                            )
-                        except Exception as e:
+                    # Try to load pre-computed perturbation if available
+                    perturbed_original = None
+                    if precomputed_dir is not None:
+                        pert_dir_name = _get_perturbation_dir_name(pert)
+                        # Extract video stem from forgery video name
+                        forgery_video_stem = Path(video_name_forgery).stem
+                        precomputed_file = (
+                            precomputed_dir / pert_dir_name / f"{forgery_video_stem}.pt"
+                        )
+                        if precomputed_file.exists():
+                            try:
+                                precomputed_data = torch.load(
+                                    precomputed_file, weights_only=False
+                                )
+                                perturbed_original = precomputed_data["video"].to(
+                                    forgery_video.device
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Error loading pre-computed {pert_dir_name}/{forgery_video_stem}.pt."
+                                    f"({display_name}): {e}"
+                                )
+                                perturbed_original = None
+                        else:
                             logger.warning(
-                                f"Error applying {display_name} (forgery): {e}"
+                                f"Precomputed data not found for {pert_dir_name}/{forgery_video_stem}.pt."
+                                "This can occur if precompute_perturbations.py was run with a different video subset "
+                                "(e.g., due to a different `max_video` setting). "
+                                "Ensure that the same random seed and `max_video` arguments are used for both "
+                                "precompute_perturbations.py and common_evaluation. "
+                                "Falling back to inline perturbation."
                             )
-                            continue
+
+                    # Apply perturbation inline if pre-computed not available
+                    if perturbed_original is None:
+                        with torch.no_grad():
+                            try:
+                                perturbed_original = _apply_perturbation(
+                                    pert, forgery_video, pert_name
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Error applying {display_name} (forgery): {e}"
+                                )
+                                continue
 
                     # Extract watermark from unwatermarked video
                     with torch.no_grad():

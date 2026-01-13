@@ -326,6 +326,46 @@ data/
       {label}_{youtube_id}_{time_start}.mp4
 ```
 
+#### Pre-computing Perturbations (Optional)
+
+For faster evaluation, you can pre-compute perturbations to disk. This is especially useful when running multiple evaluations on the same dataset.
+
+```bash
+# Pre-compute all perturbations (CPU, parallel mode)
+PYTHONPATH=src uv run python scripts/precompute_perturbations.py \
+    --dataset data/videomarkbench \
+    --output_dir data/precomputed_perturbations \
+    --workers 8
+
+# Pre-compute with GPU acceleration (sequential mode required for GPU)
+PYTHONPATH=src uv run python scripts/precompute_perturbations.py \
+    --dataset data/videomarkbench \
+    --output_dir data/precomputed_perturbations \
+    --sequential \
+    --device cuda
+```
+
+**Options:**
+- `--dataset`: Path to video dataset directory
+- `--output_dir`: Output directory for pre-computed perturbations
+- `--workers`: Number of parallel workers (default: 4, only used in parallel mode)
+- `--sequential`: Process all perturbations sequentially (required for GPU)
+- `--device`: Device for GPU-capable perturbations: `cpu`, `cuda`, `cuda:0`, etc. (default: `cpu`)
+- `--max_videos`: Maximum number of videos to process (default: all)
+
+**GPU-capable perturbations:** Gaussian, GaussianBlur, FrameAverage, FrameRemove, FrameSwitch
+**CPU-only perturbations:** JPEG, Crop, MPEG4
+
+Then use `--precomputed_dir` when running evaluation:
+
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --precomputed_dir data/precomputed_perturbations \
+    --evaluate_common
+```
+
 #### Running Evaluation
 
 **Common Perturbations, Blackbox Attacks, and Whitebox Attacks:**
