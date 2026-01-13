@@ -282,12 +282,6 @@ def main():
         default=None,
         help="Number of GPUs to use for parallel evaluation (auto-detect if None)",
     )
-    parser.add_argument(
-        "--fast_aggregation",
-        action="store_true",
-        default=False,
-        help="Use only top 2 aggregation strategies (logit_mean, bit_majority) for faster evaluation",
-    )
 
     args = parser.parse_args()
 
@@ -403,7 +397,6 @@ def main():
                     precomputed_dir=Path(args.precomputed_dir)
                     if args.precomputed_dir
                     else None,
-                    fast_aggregation=args.fast_aggregation,
                 )
             else:
                 # Use sequential single-GPU evaluation
@@ -418,7 +411,6 @@ def main():
                     precomputed_dir=Path(args.precomputed_dir)
                     if args.precomputed_dir
                     else None,
-                    fast_aggregation=args.fast_aggregation,
                 )
             # Load statistics if available
             stats_file = output_dir / "common_perturbations_stats.json"

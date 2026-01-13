@@ -24,7 +24,6 @@ def run_evaluation(
     max_videos: int,
     max_frames: int,
     num_gpus: int = None,
-    fast_aggregation: bool = False,
 ) -> float:
     """Run evaluation and return elapsed time in seconds."""
     cmd = [
@@ -47,9 +46,6 @@ def run_evaluation(
         cmd.append("--parallel")
         if num_gpus:
             cmd.extend(["--num_gpus", str(num_gpus)])
-
-    if fast_aggregation:
-        cmd.append("--fast_aggregation")
 
     env = {"PYTHONPATH": "src"}
     env.update(
@@ -132,9 +128,6 @@ def main():
         "--num_gpus", type=int, default=None, help="Number of GPUs for parallel mode"
     )
     parser.add_argument(
-        "--fast_aggregation", action="store_true", help="Use fast aggregation"
-    )
-    parser.add_argument(
         "--output_base",
         type=str,
         default="outputs/benchmark",
@@ -159,7 +152,6 @@ def main():
         output_dir=seq_dir,
         max_videos=args.max_videos,
         max_frames=args.max_frames,
-        fast_aggregation=args.fast_aggregation,
     )
 
     # Run parallel evaluation
@@ -170,7 +162,6 @@ def main():
         max_videos=args.max_videos,
         max_frames=args.max_frames,
         num_gpus=args.num_gpus,
-        fast_aggregation=args.fast_aggregation,
     )
 
     # Compare results
@@ -187,7 +178,6 @@ def main():
     print(f"Videos: {args.max_videos}")
     print(f"Max frames per video: {args.max_frames}")
     print(f"GPUs: {args.num_gpus or 'auto'}")
-    print(f"Fast aggregation: {args.fast_aggregation}")
     print("-" * 60)
     print(f"Sequential time: {results['sequential']:.2f} seconds")
     print(f"Parallel time:   {results['parallel']:.2f} seconds")

@@ -445,7 +445,6 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 **성능 옵션:**
 - `--parallel`: Common perturbations에 대해 다중 GPU 병렬 평가 활성화 (3-4배 속도 향상)
 - `--num_gpus`: 병렬 평가에 사용할 GPU 수 (미지정 시 자동 감지)
-- `--fast_aggregation`: 8개 대신 상위 2개 집계 전략만 사용 (logit_mean, bit_majority) (~75% 빠른 집계)
 
 **병렬 평가 예시:**
 ```bash
@@ -456,14 +455,6 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
     --evaluate_common \
     --parallel \
     --num_gpus 4
-
-# 축소된 집계 전략으로 빠른 평가
-PYTHONPATH=src uv run python src/evaluate/main.py \
-    --model videoseal \
-    --dataset data/videomarkbench \
-    --evaluate_common \
-    --fast_aggregation
-```
 
 **병렬 성능 벤치마크:**
 

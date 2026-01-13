@@ -310,13 +310,6 @@ AGGREGATION_STRATEGIES = {
     "detection_majority": _detection_majority,
 }
 
-# Fast aggregation strategies - top 2 most effective strategies for quick evaluation
-# These are sufficient for initial screening and reduce aggregation overhead by ~75%
-FAST_AGGREGATION_STRATEGIES = {
-    "logit_mean": _logit_mean,
-    "bit_majority": _bit_majority,
-}
-
 
 def get_common_perturbations(temp_dir: Optional[Path] = None) -> List[torch.nn.Module]:
     """
@@ -402,7 +395,6 @@ def evaluate_common_perturbations(
     evaluate_forgery: bool = True,
     kinetics_dataset: Optional[Iterator[Tuple[torch.Tensor, Dict]]] = None,
     precomputed_dir: Optional[Path] = None,
-    fast_aggregation: bool = False,
 ) -> pd.DataFrame:
     """
     Evaluate model under common perturbations.
@@ -422,21 +414,12 @@ def evaluate_common_perturbations(
             since forgery attacks skip duplicated perturbation works for each watermark model.
             Pre-computed perturbations can be generated using:
             python scripts/precompute_perturbations.py
-        fast_aggregation: If True, use only top 2 aggregation strategies
-            (logit_mean, bit_majority) for ~75% faster aggregation
 
     Returns:
         DataFrame with evaluation results
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-
-    # Select aggregation strategies
-    aggregation_strategies = (
-        FAST_AGGREGATION_STRATEGIES if fast_aggregation else AGGREGATION_STRATEGIES
-    )
-    if fast_aggregation:
-        logger.info("Using fast aggregation (2 strategies instead of 8)")
 
     # Create temp directory for MPEG4 (will be cleaned up after evaluation)
     import tempfile
@@ -571,7 +554,7 @@ def evaluate_common_perturbations(
                     logits_matched = logits
                     watermark_gt = embedded_message_long_device  # Shape: (K,) - reuse cached conversion
 
-                for agg_name, agg_func in aggregation_strategies.items():
+                for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
                     try:
                         # Use GPU tensor version for better performance
                         detected = _call_with_watermark_gt_tensor(
@@ -696,7 +679,7 @@ def evaluate_common_perturbations(
 
                     # For forgery, use the same watermark pattern as reference
                     # If this pattern is detected in unwatermarked video, it's a false positive (forgery success)
-                    for agg_name, agg_func in aggregation_strategies.items():
+                    for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
                         try:
                             # Use GPU tensor version for better performance
                             detected_forgery = _call_with_watermark_gt_tensor(

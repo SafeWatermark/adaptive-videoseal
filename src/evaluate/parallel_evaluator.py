@@ -26,7 +26,6 @@ sys.path.insert(0, str(parent_dir / "videoseal"))
 from evaluate.common_evaluator import (
     get_common_perturbations,
     AGGREGATION_STRATEGIES,
-    FAST_AGGREGATION_STRATEGIES,
     _apply_perturbation,
     _get_perturbation_params,
     _get_perturbation_dir_name,
@@ -232,12 +231,6 @@ def _process_single_video(
     else:
         forgery_video = video
 
-    # Select aggregation strategies
-    fast_aggregation = config.get("fast_aggregation", False)
-    aggregation_strategies = (
-        FAST_AGGREGATION_STRATEGIES if fast_aggregation else AGGREGATION_STRATEGIES
-    )
-
     # Process each perturbation
     for pert in perturbations:
         pert_name = type(pert).__name__
@@ -279,7 +272,7 @@ def _process_single_video(
             watermark_gt = msg_long
 
         # Evaluate with all aggregation strategies
-        for agg_name, agg_func in aggregation_strategies.items():
+        for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
             try:
                 detected = call_with_watermark_gt_tensor(
                     agg_func, logits_matched, watermark_gt
@@ -349,7 +342,7 @@ def _process_single_video(
                 logits_forgery_matched = logits_forgery
                 watermark_gt_forgery = msg_long
 
-            for agg_name, agg_func in aggregation_strategies.items():
+            for agg_name, agg_func in AGGREGATION_STRATEGIES.items():
                 try:
                     detected_forgery = call_with_watermark_gt_tensor(
                         agg_func, logits_forgery_matched, watermark_gt_forgery
@@ -391,7 +384,6 @@ def evaluate_common_perturbations_parallel(
     evaluate_forgery: bool = True,
     kinetics_dataset: Optional[Iterator[Tuple[torch.Tensor, Dict]]] = None,
     precomputed_dir: Optional[Path] = None,
-    fast_aggregation: bool = False,
 ) -> pd.DataFrame:
     """
     Parallel evaluation of common perturbations across multiple GPUs.
@@ -408,7 +400,6 @@ def evaluate_common_perturbations_parallel(
         evaluate_forgery: Whether to evaluate forgery attacks
         kinetics_dataset: Optional kinetics dataset for forgery attacks
         precomputed_dir: Path to pre-computed perturbations
-        fast_aggregation: If True, use only top 2 aggregation strategies
 
     Returns:
         DataFrame with evaluation results
@@ -421,8 +412,6 @@ def evaluate_common_perturbations_parallel(
             logger.warning("No GPUs detected, using single-process mode")
 
     logger.info(f"Starting parallel evaluation with {num_gpus} workers")
-    if fast_aggregation:
-        logger.info("Using fast aggregation (2 strategies instead of 8)")
 
     # Use spawn method for CUDA safety
     try:

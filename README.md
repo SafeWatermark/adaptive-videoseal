@@ -422,7 +422,6 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 **Performance Options:**
 - `--parallel`: Enable multi-GPU parallel evaluation for common perturbations (3-4x speedup)
 - `--num_gpus`: Number of GPUs to use for parallel evaluation (auto-detect if not specified)
-- `--fast_aggregation`: Use only top 2 aggregation strategies (logit_mean, bit_majority) instead of 8 (~75% faster aggregation)
 
 **Parallel Evaluation Example:**
 ```bash
@@ -433,14 +432,6 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
     --evaluate_common \
     --parallel \
     --num_gpus 4
-
-# Fast evaluation with reduced aggregation strategies
-PYTHONPATH=src uv run python src/evaluate/main.py \
-    --model videoseal \
-    --dataset data/videomarkbench \
-    --evaluate_common \
-    --fast_aggregation
-```
 
 **Benchmarking Parallel Performance:**
 
