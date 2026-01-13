@@ -32,6 +32,7 @@ from evaluate.common_evaluator import (
 )
 from evaluate.aggregation_utils import call_with_watermark_gt_tensor
 from evaluate.utils import calculate_statistics
+from utils import setup_seed
 
 
 def _worker_setup_model(
@@ -117,6 +118,9 @@ def _worker_process(
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     logger.info(f"Worker {worker_id} starting on {device}")
 
+    seed = model_args.get("seed", 42)
+    setup_seed(seed)
+
     # Setup model
     try:
         model = _worker_setup_model(model_name, device, model_args, logger)
@@ -200,6 +204,12 @@ def _process_single_video(
     Returns:
         List of result dictionaries
     """
+    # Reset seed based on video index for exact reproducibility with sequential mode
+    base_seed = config.get("seed", 42)
+    video_idx = config.get("video_index", 0)
+    video_seed = base_seed + video_idx
+    setup_seed(video_seed)
+
     results = []
     video_name = video_info.get("name", "unknown")
 

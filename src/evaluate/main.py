@@ -382,6 +382,7 @@ def main():
                     "video_mode": args.video_mode,
                     "chunk_size": args.chunk_size,
                     "scene_detector": args.scene_detector,
+                    "seed": args.seed,
                 }
 
                 common_results = evaluate_common_perturbations_parallel(
@@ -411,6 +412,7 @@ def main():
                     precomputed_dir=Path(args.precomputed_dir)
                     if args.precomputed_dir
                     else None,
+                    seed=args.seed,
                 )
             # Load statistics if available
             stats_file = output_dir / "common_perturbations_stats.json"
