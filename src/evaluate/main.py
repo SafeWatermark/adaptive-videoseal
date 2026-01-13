@@ -50,7 +50,7 @@ def setup_model(
 
     # Configuration for base model
     base_model.step_size = args.step_size
-    base_model.blender.scaling_w *= args.scaling_w
+    base_model.blender.scaling_w = args.scaling_w
     base_model.video_mode = args.video_mode
     base_model.chunk_size = args.chunk_size
 

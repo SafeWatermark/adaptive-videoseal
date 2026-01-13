@@ -61,7 +61,7 @@ def _worker_setup_model(
 
     # Configuration for base model
     base_model.step_size = args.get("step_size", 8)
-    base_model.blender.scaling_w *= args.get("scaling_w", 1.5)
+    base_model.blender.scaling_w = args.get("scaling_w", 1.5)
     base_model.video_mode = args.get("video_mode", "repeat")
     base_model.chunk_size = args.get("chunk_size", 32)
 
