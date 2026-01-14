@@ -412,7 +412,6 @@ def main():
                     precomputed_dir=Path(args.precomputed_dir)
                     if args.precomputed_dir
                     else None,
-                    seed=args.seed,
                 )
             # Load statistics if available
             stats_file = output_dir / "common_perturbations_stats.json"
