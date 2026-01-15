@@ -326,6 +326,46 @@ data/
       {label}_{youtube_id}_{time_start}.mp4
 ```
 
+#### Pre-computing Perturbations (Optional)
+
+For faster evaluation, you can pre-compute perturbations to disk. This is especially useful when running multiple evaluations on the same dataset.
+
+```bash
+# Pre-compute all perturbations (CPU, parallel mode)
+PYTHONPATH=src uv run python scripts/precompute_perturbations.py \
+    --dataset data/videomarkbench \
+    --output_dir data/precomputed_perturbations \
+    --workers 8
+
+# Pre-compute with GPU acceleration (sequential mode required for GPU)
+PYTHONPATH=src uv run python scripts/precompute_perturbations.py \
+    --dataset data/videomarkbench \
+    --output_dir data/precomputed_perturbations \
+    --sequential \
+    --device cuda
+```
+
+**Options:**
+- `--dataset`: Path to video dataset directory
+- `--output_dir`: Output directory for pre-computed perturbations
+- `--workers`: Number of parallel workers (default: 4, only used in parallel mode)
+- `--sequential`: Process all perturbations sequentially (required for GPU)
+- `--device`: Device for GPU-capable perturbations: `cpu`, `cuda`, `cuda:0`, etc. (default: `cpu`)
+- `--max_videos`: Maximum number of videos to process (default: all)
+
+**GPU-capable perturbations:** Gaussian, GaussianBlur, FrameAverage, FrameRemove, FrameSwitch
+**CPU-only perturbations:** JPEG, Crop, MPEG4
+
+Then use `--precomputed_dir` when running evaluation:
+
+```bash
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --precomputed_dir data/precomputed_perturbations \
+    --evaluate_common
+```
+
 #### Running Evaluation
 
 **Common Perturbations, Blackbox Attacks, and Whitebox Attacks:**
@@ -378,6 +418,40 @@ PYTHONPATH=src uv run python src/evaluate/main.py \
 - `--evaluate_whitebox`: Evaluate whitebox attacks (WEvade)
 - `--wevade_version`: `standard` or `adaptive` (default: `standard`)
 - `--wevade_rb`: Perturbation bound (L-infinity norm) (default: 0.1)
+
+**Performance Options:**
+- `--parallel`: Enable multi-GPU parallel evaluation for common perturbations (3-4x speedup)
+- `--num_gpus`: Number of GPUs to use for parallel evaluation (auto-detect if not specified)
+
+**Parallel Evaluation Example:**
+```bash
+# Multi-GPU parallel evaluation (4 GPUs)
+PYTHONPATH=src uv run python src/evaluate/main.py \
+    --model videoseal \
+    --dataset data/videomarkbench \
+    --evaluate_common \
+    --parallel \
+    --num_gpus 4
+
+**Benchmarking Parallel Performance:**
+
+To compare sequential vs parallel performance and verify results:
+
+```bash
+# Run benchmark (compares sequential vs parallel, verifies results match)
+PYTHONPATH=src uv run python scripts/benchmark_parallel.py \
+    --dataset data/videomarkbench \
+    --max_videos 5 \
+    --num_gpus 4
+```
+
+The benchmark script will output timing comparison and speedup ratio:
+```
+Sequential time: 245.32 seconds
+Parallel time:   68.45 seconds
+Speedup: 3.58x
+Results match: YES
+```
 
 **Note:**
 - **Removal attacks** use the VideoMarkBench dataset (generated AI videos)
