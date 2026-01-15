@@ -487,13 +487,6 @@ def evaluate_common_perturbations(
                     )
                     original_video_forgery = None
 
-            # Note: No caching of perturbation results to save memory
-            # Each perturbation is only used once, so caching doesn't help
-
-            # Keep tensors on GPU (model device) throughout evaluation
-            # This avoids unnecessary GPU->CPU->GPU transfers that were causing overhead
-            # The model.embed() output is already on GPU, keep it there
-
             # Evaluate each perturbation
             pert_tqdm = tqdm(
                 perturbations, desc=f"{video_name}: perturbations", leave=False
