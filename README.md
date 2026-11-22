@@ -238,6 +238,37 @@ The `conftest.py` file fixes a global random seed to ensure experiment reproduci
 
 ## 6. Evaluation
 
+### Scene-Detector Threshold × Step-Size Sweep Results
+
+Results of the sweeps in [3.6](#36-scene-detector-threshold-experiments), using each detector's default threshold.
+
+* **Setup:** SA-V validation, 30 videos (360p–1080p), seed 42, VideoSeal 1.0 with JND attenuation, `chunk_size=32`, `mode=repeat`
+* **Condition:** identity only (no attacks), so these numbers say nothing about robustness. See VideoMarkBench below for attacks.
+* **Cell format:** `bit accuracy (embed ratio)`. Embed ratio is the fraction of frames passed through the embedder; the rest receive a propagated watermark.
+
+| Detector (τ) | step 8 | step 16 | step 32 | step 64 | step 128 |
+|---|---|---|---|---|---|
+| Content (42.0) | 99.8% (13.6%) | 99.2% (7.4%) | 97.0% (4.3%) | 92.8% (2.7%) | 84.5% (2.0%) |
+| Histogram (0.15) | 99.8% (13.9%) | 99.2% (7.7%) | 97.1% (4.5%) | 92.9% (3.0%) | 84.9% (2.2%) |
+| Hash (0.45) | 99.8% (13.3%) | 99.2% (7.1%) | 97.0% (3.9%) | 93.0% (2.4%) | 84.6% (1.7%) |
+| LPIPS (0.125) | 99.9% (20.9%) | 99.5% (15.2%) | 98.1% (12.4%) | 95.9% (10.9%) | 92.3% (10.3%) |
+| Uniform keyframes (1/step) | – (12.5%) | – (6.2%) | – (3.1%) | – (1.6%) | – (0.8%) |
+
+**Observations**
+
+* At step 8, embedding about 13–14% of frames keeps bit accuracy at about 99.8% for every detector (lowest single video: 97.3%; 98.0% for LPIPS).
+* Embed ratio exceeds the uniform 1/step rate because scene cuts add extra keyframes. LPIPS triggers the most cuts, so it degrades least at large steps but uses more embeddings.
+* At a similar embedding budget, periodic keyframes do better than scene-cut keyframes: Content at step 16 gives 99.2% with 7.4% embedded, while LPIPS at step 128 gives 92.3% with 10.3% embedded.
+* Wall-clock embedding time stayed about the same across step sizes (≈53 s per video for Content), so the lower embed ratio has **not** yet translated into a measured speed-up.
+
+**Limitations**
+
+* No fixed-step vanilla VideoSeal baseline was run on the same 30 videos, so this sweep alone cannot show that adaptive selection beats uniform keyframes.
+* Visual-quality metrics (PSNR/SSIM/VMAF) were skipped (`--skip_image_metrics True`), and ECC/MAC modes were not part of this sweep.
+* Full per-threshold results (per-step means, per-video metrics, plots): [`results/step_size_eval/<Detector>/threshold_<τ>/`](results/step_size_eval/)
+* Runs for Hash τ=0.5, Histogram τ=0.2 and LPIPS τ=0.15 did not finish and are not included.
+
+
 ### VideoMarkBench
 
 This project includes the VideoMarkBench repository as a submodule, enabling systematic evaluation of the robustness of VideoSeal and AdaptiveVideoSeal.

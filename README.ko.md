@@ -242,6 +242,37 @@ conftest.py에서 모든 테스트의 랜덤 시드(seed) 를 고정하여
 
 ## 6. Evaluation
 
+### Scene-Detector Threshold × Step-Size 실험 결과
+
+[3.6](#36-scene-detector-threshold-experiments)의 실험 결과입니다. 각 detector의 기본 threshold 기준입니다.
+
+* **설정:** SA-V validation 영상 30편(360p–1080p), seed 42, VideoSeal 1.0 + JND attenuation, `chunk_size=32`, `mode=repeat`
+* **조건:** 공격 없음(identity)만 측정했으므로 강건성은 이 결과로 판단할 수 없습니다. 공격 조건은 아래 VideoMarkBench를 참고하세요.
+* **셀 형식:** `bit accuracy (embed ratio)`. embed ratio는 embedder로 직접 임베딩한 프레임 비율이며, 나머지 프레임에는 워터마크를 전파합니다.
+
+| Detector (τ) | step 8 | step 16 | step 32 | step 64 | step 128 |
+|---|---|---|---|---|---|
+| Content (42.0) | 99.8% (13.6%) | 99.2% (7.4%) | 97.0% (4.3%) | 92.8% (2.7%) | 84.5% (2.0%) |
+| Histogram (0.15) | 99.8% (13.9%) | 99.2% (7.7%) | 97.1% (4.5%) | 92.9% (3.0%) | 84.9% (2.2%) |
+| Hash (0.45) | 99.8% (13.3%) | 99.2% (7.1%) | 97.0% (3.9%) | 93.0% (2.4%) | 84.6% (1.7%) |
+| LPIPS (0.125) | 99.9% (20.9%) | 99.5% (15.2%) | 98.1% (12.4%) | 95.9% (10.9%) | 92.3% (10.3%) |
+| 균일 키프레임 (1/step) | – (12.5%) | – (6.2%) | – (3.1%) | – (1.6%) | – (0.8%) |
+
+**관찰**
+
+* step 8에서는 모든 detector가 프레임의 약 13–14%만 임베딩하고도 bit accuracy 약 99.8%를 유지했습니다 (영상별 최저값 97.3%, LPIPS는 98.0%).
+* 장면 전환 지점에 키프레임이 추가되어 embed ratio가 균일 비율(1/step)보다 높습니다. LPIPS는 장면 전환을 가장 많이 감지하므로 큰 step에서 정확도 하락이 가장 작지만, 그만큼 임베딩 프레임도 많습니다.
+* 임베딩 예산이 비슷하면 주기적 키프레임이 장면 전환 키프레임보다 효과적이었습니다. Content step 16은 7.4% 임베딩으로 99.2%, LPIPS step 128은 10.3% 임베딩으로 92.3%입니다.
+* 임베딩 소요 시간은 step 크기와 무관하게 거의 같았습니다 (Content 기준 영상당 약 53초). 따라서 embed ratio 감소가 실제 속도 향상으로 이어졌는지는 **아직 확인되지 않았습니다.**
+
+**한계**
+
+* 같은 30편에 대한 고정 step vanilla VideoSeal 기준선을 측정하지 않았으므로, 이 결과만으로 적응형 선택이 균일 키프레임보다 낫다고 말할 수 없습니다.
+* 화질 지표(PSNR/SSIM/VMAF)는 측정하지 않았고(`--skip_image_metrics True`), ECC/MAC 모드도 이번 실험 범위에 포함되지 않았습니다.
+* threshold별 전체 결과(step별 평균, 영상별 지표, 그래프): [`results/step_size_eval/<Detector>/threshold_<τ>/`](results/step_size_eval/)
+* Hash τ=0.5, Histogram τ=0.2, LPIPS τ=0.15 실험은 완료되지 않아 제외했습니다.
+
+
 ### VideoMarkBench
 
 본 프로젝트는 VideoMarkBench 레포지토리를 submodule로 포함하며, VideoSeal 및 AdaptiveVideoSeal의 강건성을 체계적으로 평가할 수 있습니다.
