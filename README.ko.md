@@ -269,7 +269,7 @@ conftest.py에서 모든 테스트의 랜덤 시드(seed) 를 고정하여
 
 * 같은 30편에 대한 고정 step vanilla VideoSeal 기준선을 측정하지 않았으므로, 이 결과만으로 적응형 선택이 균일 키프레임보다 낫다고 말할 수 없습니다.
 * 화질 지표(PSNR/SSIM/VMAF)는 측정하지 않았고(`--skip_image_metrics True`), ECC/MAC 모드도 이번 실험 범위에 포함되지 않았습니다.
-* threshold별 전체 결과: `outputs/step_size_eval/<Detector>/threshold_<τ>/summary_by_step_size.csv`
+* threshold별 전체 결과(step별 평균, 영상별 지표, 그래프): [`results/step_size_eval/<Detector>/threshold_<τ>/`](results/step_size_eval/)
 
 
 ### VideoMarkBench
