@@ -266,6 +266,7 @@ Results of the sweeps in [3.6](#36-scene-detector-threshold-experiments), using 
 * No fixed-step vanilla VideoSeal baseline was run on the same 30 videos, so this sweep alone cannot show that adaptive selection beats uniform keyframes.
 * Visual-quality metrics (PSNR/SSIM/VMAF) were skipped (`--skip_image_metrics True`), and ECC/MAC modes were not part of this sweep.
 * Full per-threshold results (per-step means, per-video metrics, plots): [`results/step_size_eval/<Detector>/threshold_<τ>/`](results/step_size_eval/)
+* Runs for Hash τ=0.5, Histogram τ=0.2 and LPIPS τ=0.15 did not finish and are not included.
 
 
 ### VideoMarkBench
